@@ -22,7 +22,7 @@ Tài liệu này liệt kê **mọi thành phần chạy nền** của hệ th�
 | svdb | PostgreSQL 16 (`shop`, `payments`) | systemd service | `postgresql` | 5432 | Có |
 | svdb | Backup database 02:30 hằng ngày | cron | `/etc/cron.d/shop-db-backup` | - | Có |
 | svdb | Dọn đơn do tải tạo ra, quá 2 ngày, 03:00 hằng ngày | cron | `/etc/cron.d/shop-load-cleanup` | - | Có |
-| control-plane | Tải giả lập k6 (4 người dùng ảo, ~130 request/phút, ~20-30 đơn/giờ) | systemd **user** service của `cp` | `shop-load` | - | Có (linger bật) |
+| control-plane | Tải giả lập k6 (2 người dùng ảo, ~55 request/phút, ~10 đơn/giờ) | systemd **user** service của `cp` | `shop-load` | - | Có (linger bật) |
 
 Không có thành phần nào khác của hệ thống chạy nền.
 
@@ -129,7 +129,7 @@ Mức tải: sửa `~/.config/shop-load/env` rồi `systemctl --user restart sho
 
 | Mức | Cấu hình | Lưu lượng | Đơn hàng |
 |---|---|---|---|
-| Nền (mặc định) | `VUS=4`, `BUY_PERCENT=3` | ~130 request/phút | ~20-30/giờ |
+| Nền (mặc định) | `VUS=2`, `BUY_PERCENT=2` | ~55 request/phút | ~10/giờ |
 | Buổi demo | `VUS=10`, `BUY_PERCENT=25` | ~300 request/phút | ~440/giờ |
 
 Sau buổi demo nên trả về mức nền; đơn sinh ra sẽ được lịch dọn xóa sau 2 ngày.
