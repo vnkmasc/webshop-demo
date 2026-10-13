@@ -22,7 +22,7 @@ webshop-demo/
 
 ```bash
 git clone git@github.com:vnkmasc/webshop.git
-git clone <repo này> webshop-demo
+git clone git@github.com:vnkmasc/webshop-demo.git
 cd webshop-demo/targets/rhel-3vm
 ./build-release.sh 1.0.0 ../../../webshop
 # rồi làm theo targets/rhel-3vm/README.md
