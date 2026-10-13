@@ -4,6 +4,8 @@ Mỗi bài gồm: **lệnh gây sự cố**, **hiện tượng** người dùng 
 
 Không phụ thuộc công cụ giám sát nào; cột "nơi thấy rõ" chỉ nêu loại tín hiệu (thời gian phản hồi, lỗi, tài nguyên máy, tiến trình...).
 
+> **Trước khi tập các bài firewall/mạng (2.2, 2.7, 3.7, 4.2), đảm bảo mở được console của VM trên hypervisor**: nếu lỡ mất SSH, đó là đường duy nhất để khôi phục.
+>
 > Chỉ làm trên môi trường demo. Mỗi lần **một** bài, để 15-30 phút cho công cụ giám sát kịp phát hiện, khôi phục xong rồi mới sang bài khác. Các bài có rủi ro mất kết nối dùng dạng **tự khôi phục sau N giây**.
 
 ## 0. Chuẩn bị
@@ -96,7 +98,11 @@ ssh root@$DB "firewall-cmd --add-rich-rule='rule family=\"ipv4\" source address=
   && runuser -u postgres -- psql -qc \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname IN ('shop','payments') AND pid <> pg_backend_pid()\""
 ```
 - **Hiện tượng:** request treo ~5 giây rồi lỗi 500 (`Connection is not available, request timed out`); PostgreSQL vẫn chạy bình thường. Đây là kiểu "dịch vụ phụ thuộc không phản hồi" chứ không phải "dịch vụ chết".
-- **Khôi phục sớm:** `ssh root@$DB 'firewall-cmd --reload'` (bỏ mọi rule tạm, giữ rule cố định).
+- **Khôi phục sớm** (gỡ đúng rule tạm đó):
+  ```bash
+  ssh root@$DB "firewall-cmd --remove-rich-rule='rule family=\"ipv4\" source address=\"$APP\" port port=\"5432\" protocol=\"tcp\" drop'"
+  ```
+- **Không dùng `firewall-cmd --reload` khi đang có rule tạm (`--timeout`)**: firewalld có thể lỗi giữa chừng (`dictionary changed size during iteration`) và chặn toàn bộ máy, kể cả SSH; khi đó chỉ khôi phục được qua console của VM bằng `systemctl restart firewalld`.
 - **Kiểm tra:** `check`.
 
 ### 2.3 Khóa bảng (giao dịch giữ lock lâu)
@@ -234,7 +240,10 @@ ssh root@$APP "firewall-cmd --add-rich-rule='rule family=\"ipv4\" source address
   && ssh root@$WEB 'systemctl restart nginx'
 ```
 - **Hiện tượng:** trang tĩnh vẫn tải, mọi `/api` chờ 5 giây rồi trả 504 Gateway Timeout; backend khỏe nhưng không thấy request nào.
-- **Khôi phục sớm:** `ssh root@$APP 'firewall-cmd --reload'`
+- **Khôi phục sớm** (gỡ đúng rule tạm, không dùng `--reload`):
+  ```bash
+  ssh root@$APP "firewall-cmd --remove-rich-rule='rule family=\"ipv4\" source address=\"$WEB\" port port=\"8080\" protocol=\"tcp\" drop'"
+  ```
 
 ## 5. Triển khai
 
@@ -260,7 +269,7 @@ Tương tự cho cổng thanh toán (quay về image `:prev`): `WAIT_SECONDS=60 
 
 ## 6. Khôi phục tất cả
 
-Khi không chắc còn gì đang bật:
+Khi không chắc còn gì đang bật (không dùng `firewall-cmd --reload`, xem mục 2.2):
 
 ```bash
 # Ứng dụng: tắt mọi kịch bản và đưa cổng thanh toán về bình thường (cần TOKEN ở mục 1)
@@ -268,9 +277,9 @@ for s in LATENCY HTTP_ERROR SLOW_SQL N_PLUS_ONE POOL_EXHAUSTION HIGH_CPU MEMORY_
 gateway '{"baseLatencyMs":250,"extraLatencyMs":0,"errorRatePercent":0,"declineRatePercent":3,"outage":false}'
 
 # Hạ tầng
-ssh root@$DB  "firewall-cmd --reload; tc qdisc del dev $IFACE root 2>/dev/null; rm -f /var/tmp/disk-fill.img; systemctl start postgresql; \
+ssh root@$DB  "firewall-cmd --remove-rich-rule='rule family=\"ipv4\" source address=\"$APP\" port port=\"5432\" protocol=\"tcp\" drop' 2>/dev/null; tc qdisc del dev $IFACE root 2>/dev/null; rm -f /var/tmp/disk-fill.img; systemctl start postgresql; \
                runuser -u postgres -- psql -qc \"SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE query LIKE '%generate_series(1, 1e12)%' AND pid <> pg_backend_pid()\""
-ssh root@$APP "firewall-cmd --reload; tc qdisc del dev $IFACE root 2>/dev/null; pkill -x yes; pkill -f 'bytearray(3'; systemctl start shop-payment shop-backend"
+ssh root@$APP "firewall-cmd --remove-rich-rule='rule family=\"ipv4\" source address=\"$WEB\" port port=\"8080\" protocol=\"tcp\" drop' 2>/dev/null; tc qdisc del dev $IFACE root 2>/dev/null; pkill -x yes; pkill -f 'bytearray(3'; systemctl start shop-payment shop-backend"
 ssh root@$WEB 'systemctl start nginx'
 
 # Tải về mức nền
