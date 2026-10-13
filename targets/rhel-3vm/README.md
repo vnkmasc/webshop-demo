@@ -2,7 +2,7 @@
 
 Thứ tự: **CSDL → ứng dụng → web**. Mọi script có thể chạy lại an toàn. Các lệnh ở bước 2-4 chạy trên từng máy, trong thư mục gói phát hành đã giải nén (`/root/shop-<version>`).
 
-Đang vận hành gì, bật/tắt thế nào: [operations.md](operations.md). Kịch bản tải và sự cố: [../../scenarios/README.md](../../scenarios/README.md).
+Đang vận hành gì, bật/tắt thế nào: [operations.md](operations.md). Lệnh tự thực hành sự cố (tắt DB, chặn mạng, đầy đĩa...): [fault-drills.md](fault-drills.md). Kịch bản tải và sự cố: [../../scenarios/README.md](../../scenarios/README.md).
 
 Ví dụ địa chỉ trong tài liệu: web `10.0.0.11`, ứng dụng `10.0.0.12`, CSDL `10.0.0.13`.
 

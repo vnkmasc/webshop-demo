@@ -1,5 +1,7 @@
 # Vận hành: những gì đang chạy và cách bật/tắt
 
+Bài tập gây sự cố có lệnh khôi phục: [fault-drills.md](fault-drills.md).
+
 Tài liệu này liệt kê **mọi thành phần chạy nền** của hệ thống demo, nằm ở máy nào, và lệnh để kiểm tra, tắt, bật lại. Mọi lệnh chạy bằng `root` trên máy tương ứng, trừ phần tải giả lập.
 
 Địa chỉ trong môi trường demo hiện tại:

@@ -65,7 +65,7 @@ POST /api/admin/simulation/release-memory
 | Tỷ lệ lỗi 30% | Một phần đơn thẻ thất bại | Dịch vụ thanh toán trả 502, lỗi lan sang backend |
 | Ngừng hoạt động | Mọi đơn thẻ thất bại, COD vẫn chạy | 503 từ dịch vụ thanh toán; tỷ lệ thất bại trên trang Tổng quan tăng |
 
-Sự cố hạ tầng làm thủ công:
+Sự cố hạ tầng làm thủ công (danh sách đầy đủ kèm lệnh khôi phục cho target `rhel-3vm`: [../targets/rhel-3vm/fault-drills.md](../targets/rhel-3vm/fault-drills.md)):
 
 ```bash
 systemctl stop shop-payment        # máy ứng dụng: thanh toán thẻ lỗi kết nối, COD vẫn chạy
