@@ -1,0 +1,30 @@
+# Card payment gateway in a Docker container, supervised by systemd.
+# The container is recreated on every start from the image tagged shop-payment:current (built by deploy.sh).
+[Unit]
+Description=Sai Buoc card payment gateway (Docker container)
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Generated from /etc/shop/app.env by shop-payment-env (docker reads env files literally, without shell quoting).
+ExecStartPre=-/usr/bin/docker rm -f shop-payment
+ExecStart=/usr/bin/docker run --rm --name shop-payment \
+    --env-file /etc/shop/payment.env \
+    -e SPRING_PROFILES_ACTIVE=prod \
+    -e PAYMENT_BIND_ADDRESS=0.0.0.0 \
+    -e PAYMENT_LOG_FILE=/var/log/shop-payment/payment.log \
+    -p 127.0.0.1:8090:8090 \
+    -v /var/log/shop-payment:/var/log/shop-payment \
+    --log-driver journald \
+    shop-payment:current
+ExecStop=/usr/bin/docker stop -t 30 shop-payment
+Restart=always
+RestartSec=5
+TimeoutStartSec=120
+TimeoutStopSec=45
+SyslogIdentifier=shop-payment
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,16 @@
+# HTTP-only site (default). Rendered with envsubst: APP_DOMAIN, BACKEND_UPSTREAM, WEB_ROOT.
+include /etc/nginx/snippets/shop/http-context.conf;
+
+upstream shop_backend {
+    server ${BACKEND_UPSTREAM};
+    keepalive 32;
+}
+
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name ${APP_DOMAIN} localhost _;
+
+    root ${WEB_ROOT};
+    include /etc/nginx/snippets/shop/locations.conf;
+}

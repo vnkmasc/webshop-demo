@@ -1,0 +1,21 @@
+[Unit]
+Description=Sai Buoc shop backend (Spring Boot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=shop
+Group=shop
+WorkingDirectory=/opt/shop/backend
+EnvironmentFile=/etc/shop/app.env
+ExecStart=/bin/sh -c 'exec /usr/lib/jvm/jre-21/bin/java $BACKEND_JAVA_OPTS -jar /opt/shop/backend/shop-backend.jar'
+SuccessExitStatus=143
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=40
+LimitNOFILE=65536
+SyslogIdentifier=shop-backend
+
+[Install]
+WantedBy=multi-user.target
