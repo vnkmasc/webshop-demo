@@ -94,6 +94,16 @@ cat > /etc/cron.d/shop-db-backup <<CRON
 CRON
 systemctl enable --now crond >/dev/null
 
+if [[ -n "${LOAD_CLEANUP_DAYS:-}" ]]; then
+    log "Installing nightly clean-up of load-test orders older than ${LOAD_CLEANUP_DAYS} days (03:00)"
+    install -m 750 "${HERE}/cleanup-load-orders.sh" /usr/local/bin/shop-load-cleanup
+    cat > /etc/cron.d/shop-load-cleanup <<CRON
+0 3 * * * root ENV_FILE=${ENV_FILE} /usr/local/bin/shop-load-cleanup >> /var/log/shop-load-cleanup.log 2>&1
+CRON
+else
+    rm -f /etc/cron.d/shop-load-cleanup
+fi
+
 log "Firewall: SSH from anywhere, 5432 only from ${BACKEND_HOST}"
 ensure_firewalld
 fw_allow_from "${BACKEND_HOST}" 5432

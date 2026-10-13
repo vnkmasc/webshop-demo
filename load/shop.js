@@ -1,11 +1,12 @@
 // k6 load profile for the shop: realistic storefront traffic plus back-office work.
 //   ./run.sh http://shop.example.com steady 10 2h
-// Personas (weights per iteration):
-//   browser   55%  home -> category / search with filters -> product pages
-//   buyer     25%  browse -> cart quote (sometimes a coupon) -> checkout (COD or card; some cards are declined)
-//   customer  10%  log in with a load-test account -> order history -> order detail
-//   tracker    5%  guest order lookup
-//   admin      5%  dashboard -> confirm / ship / deliver orders -> restock sizes that ran out
+// Personas (share of iterations, overridable with *_PERCENT environment variables):
+//   buyer     BUY_PERCENT=25      browse -> cart quote (sometimes a coupon) -> 70% check out (COD or card; some declined)
+//   customer  CUSTOMER_PERCENT=10 log in with a load-test account -> order history -> order detail
+//   tracker   TRACK_PERCENT=5     guest order lookup
+//   admin     ADMIN_PERCENT=5     dashboard -> confirm / ship / deliver orders -> restock sizes that ran out
+//   browser   the rest            home -> category / search with filters -> product pages
+// Every order this script places has the note "k6", so generated data can be told apart and cleaned up.
 import http from 'k6/http';
 import { check, group, sleep } from 'k6';
 import { Counter, Trend } from 'k6/metrics';
@@ -164,12 +165,18 @@ function admin() {
   });
 }
 
+const pct = (name, def) => Math.max(0, Number(__ENV[name] ?? def)) / 100;
+const BUY = pct('BUY_PERCENT', 25);
+const CUSTOMER = pct('CUSTOMER_PERCENT', 10);
+const TRACK = pct('TRACK_PERCENT', 5);
+const ADMIN = pct('ADMIN_PERCENT', 5);
+
 export default function () {
   const r = Math.random();
-  if (r < 0.55) browse();
-  else if (r < 0.80) buy();
-  else if (r < 0.90) customer();
-  else if (r < 0.95) tracker();
-  else admin();
+  if (r < BUY) buy();
+  else if (r < BUY + CUSTOMER) customer();
+  else if (r < BUY + CUSTOMER + TRACK) tracker();
+  else if (r < BUY + CUSTOMER + TRACK + ADMIN) admin();
+  else browse();
   think(2, 6);
 }

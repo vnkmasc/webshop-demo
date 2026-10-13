@@ -21,7 +21,8 @@ Tài liệu này liệt kê **mọi thành phần chạy nền** của hệ th�
 | svbe | Cổng thanh toán | **container Docker**, systemd chạy `docker run` | `shop-payment` (container cùng tên) | 127.0.0.1:8090 | Có |
 | svdb | PostgreSQL 16 (`shop`, `payments`) | systemd service | `postgresql` | 5432 | Có |
 | svdb | Backup database 02:30 hằng ngày | cron | `/etc/cron.d/shop-db-backup` | - | Có |
-| control-plane | Tải giả lập k6 (10 người dùng ảo) | systemd **user** service của `cp` | `shop-load` | - | Có (linger bật) |
+| svdb | Dọn đơn do tải tạo ra, quá 2 ngày, 03:00 hằng ngày | cron | `/etc/cron.d/shop-load-cleanup` | - | Có |
+| control-plane | Tải giả lập k6 (4 người dùng ảo, ~130 request/phút, ~20-30 đơn/giờ) | systemd **user** service của `cp` | `shop-load` | - | Có (linger bật) |
 
 Không có thành phần nào khác của hệ thống chạy nền.
 
@@ -99,6 +100,13 @@ Cấu hình: `/etc/shop/db.env`, `/var/lib/pgsql/data/conf.d/shop.conf`. Log: `/
 
 Backup: lịch ở `/etc/cron.d/shop-db-backup`, file ở `/var/lib/pgsql/backups/shop`. Tắt lịch backup: `mv /etc/cron.d/shop-db-backup /root/`. Chạy backup ngay: `ENV_FILE=/etc/shop/db.env /usr/local/bin/shop-db-backup`.
 
+Dọn dữ liệu do tải tạo ra: mọi đơn của k6 có ghi chú `k6`. Lịch `/etc/cron.d/shop-load-cleanup` chạy `/usr/local/bin/shop-load-cleanup` lúc 03:00, xóa các đơn đó cũ hơn `LOAD_CLEANUP_DAYS` ngày (trong `/etc/shop/db.env`, hiện là 2) kèm sản phẩm trong đơn, lịch sử trạng thái, giao dịch ở database `payments`, rồi tính lại số đã bán và lượt dùng mã giảm giá. Nhật ký: `/var/log/shop-load-cleanup.log`.
+
+```bash
+ENV_FILE=/etc/shop/db.env /usr/local/bin/shop-load-cleanup 0    # xóa ngay mọi đơn của tải (0 = không giữ ngày nào)
+mv /etc/cron.d/shop-load-cleanup /root/                          # tắt lịch dọn
+```
+
 ### Tải giả lập k6 (control-plane, user `cp`)
 
 Chạy dưới dạng systemd user service để có lưu lượng liên tục vào shop (các nhóm hành vi: [../../scenarios/README.md](../../scenarios/README.md)). File unit mẫu: [`load/shop-load.user.service`](../../load/shop-load.user.service).
@@ -114,14 +122,21 @@ journalctl --user -u shop-load -f
 | File | Nội dung |
 |---|---|
 | `~/.config/systemd/user/shop-load.service` | Unit chạy `k6 run <repo webshop-demo>/load/shop.js` (bản sao của `load/shop-load.user.service`) |
-| `~/.config/shop-load/env` | `BASE_URL`, `PROFILE`, `VUS` (số người dùng ảo), `DURATION`, `ADMIN_PASSWORD` (chmod 600) |
+| `~/.config/shop-load/env` | `BASE_URL`, `PROFILE`, `VUS` (số người dùng ảo), `BUY_PERCENT` (tỷ lệ lượt mua hàng), `DURATION`, `ADMIN_PASSWORD` (chmod 600) |
 | `~/.local/bin/k6` | k6 (bản tải từ GitHub releases) |
 
-Đổi số người dùng ảo: sửa `VUS` trong `~/.config/shop-load/env` rồi `systemctl --user restart shop-load`.
+Mức tải: sửa `~/.config/shop-load/env` rồi `systemctl --user restart shop-load`.
+
+| Mức | Cấu hình | Lưu lượng | Đơn hàng |
+|---|---|---|---|
+| Nền (mặc định) | `VUS=4`, `BUY_PERCENT=3` | ~130 request/phút | ~20-30/giờ |
+| Buổi demo | `VUS=10`, `BUY_PERCENT=25` | ~300 request/phút | ~440/giờ |
+
+Sau buổi demo nên trả về mức nền; đơn sinh ra sẽ được lịch dọn xóa sau 2 ngày.
 
 `loginctl enable-linger cp` đã được bật để service chạy cả khi `cp` không đăng nhập; tắt bằng `loginctl disable-linger cp`.
 
-Tải giả lập liên tục tạo đơn hàng thật trong database. Nhóm quản trị trong kịch bản tự xử lý đơn và nhập thêm hàng cho size đã hết, nên có thể chạy nhiều ngày.
+Tải giả lập tạo đơn hàng thật trong database (ghi chú `k6`); nhóm quản trị trong kịch bản tự xử lý đơn và nhập thêm hàng cho size đã hết, lịch dọn trên svdb xóa đơn cũ, nên có thể chạy liên tục nhiều tuần.
 
 ## 4. Tắt toàn bộ demo
 
@@ -129,13 +144,13 @@ Tải giả lập liên tục tạo đơn hàng thật trong database. Nhóm qu�
 systemctl --user disable --now shop-load                                 # control-plane
 ssh root@192.168.50.64 'systemctl disable --now nginx'
 ssh root@192.168.50.65 'systemctl disable --now shop-backend shop-payment'
-ssh root@192.168.50.66 'systemctl disable --now postgresql; mv /etc/cron.d/shop-db-backup /root/ 2>/dev/null'
+ssh root@192.168.50.66 'systemctl disable --now postgresql; mv /etc/cron.d/shop-db-backup /etc/cron.d/shop-load-cleanup /root/ 2>/dev/null'
 ```
 
 Bật lại theo thứ tự CSDL → ứng dụng → web → tải:
 
 ```bash
-ssh root@192.168.50.66 'systemctl enable --now postgresql; mv /root/shop-db-backup /etc/cron.d/ 2>/dev/null'
+ssh root@192.168.50.66 'systemctl enable --now postgresql; mv /root/shop-db-backup /root/shop-load-cleanup /etc/cron.d/ 2>/dev/null'
 ssh root@192.168.50.65 'systemctl enable --now shop-payment shop-backend'
 ssh root@192.168.50.64 'systemctl enable --now nginx'
 systemctl --user enable --now shop-load
