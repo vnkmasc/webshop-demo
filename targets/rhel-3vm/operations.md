@@ -18,6 +18,7 @@ Tài liệu này liệt kê **mọi thành phần chạy nền** của hệ th�
 | Máy | Thành phần | Kiểu chạy | Tên unit | Cổng | Tự chạy khi khởi động máy |
 |---|---|---|---|---|---|
 | svfrt | nginx | systemd service | `nginx` | 80 | Có |
+| svfrt | Kiểm tra readiness của backend 5 giây/lần, chuyển `/api` sang 503 khi backend không sẵn sàng | systemd timer | `shop-upstream-check.timer` | - | Có |
 | svbe | Backend cửa hàng | systemd service (Java) | `shop-backend` | 8080, 8081 (health) | Có |
 | svbe | Docker Engine (Docker CE) | systemd service | `docker`, `containerd` | - | Có |
 | svbe | Cổng thanh toán | **container Docker**, systemd chạy `docker run` | `shop-payment` (container cùng tên) | 127.0.0.1:8090 | Có |
@@ -53,6 +54,19 @@ systemctl enable --now nginx
 
 Cấu hình: `/etc/shop/web.env`, `/etc/nginx/conf.d/shop.conf` (sinh bởi `shop-render-nginx`). Log: `/var/log/nginx/`.
 
+### Kiểm tra readiness của backend (svfrt)
+
+nginx bản thường không tự kiểm tra sức khỏe backend, nên timer `shop-upstream-check.timer` chạy `/usr/local/sbin/shop-upstream-check` 5 giây/lần, giống health check của bộ cân bằng tải: đọc `/actuator/health/readiness` (cổng 8081 của svbe); hỏng 2 lần liên tiếp thì `/api` trả 503 JSON "đang bảo trì" (có `Retry-After`), tốt 1 lần thì phục vụ lại. nginx chỉ reload khi trạng thái đổi.
+
+```bash
+systemctl status shop-upstream-check.timer
+cat /etc/nginx/shop-backend-state.conf            # set $shop_backend_ready 1 (phục vụ) hoặc 0 (503)
+journalctl -t shop-upstream-check -f              # mỗi lần loại ra / đưa vào vòng phục vụ
+systemctl disable --now shop-upstream-check.timer # tắt kiểm tra (nginx luôn chuyển /api sang backend)
+```
+
+Tắt hẳn kiểm tra mà file trạng thái đang là `0` thì sửa về `1` rồi `systemctl reload nginx`. Địa chỉ kiểm tra đổi được bằng `BACKEND_HEALTH_URL` trong `/etc/shop/web.env`.
+
 ### shop-backend (svbe)
 
 ```bash
@@ -63,6 +77,8 @@ curl -s http://127.0.0.1:8081/actuator/health
 ```
 
 Cấu hình: `/etc/shop/app.env`. Log JSON: `/var/log/shop/backend.log`; log dạng chữ: `journalctl -u shop-backend -f`.
+
+Cổng quản trị 8081 (chỉ mạng quản trị và máy web vào được): `/actuator/health` (kèm `liveness`, `readiness`), `/actuator/info`, `/actuator/prometheus` (metric dạng Prometheus, không cần đăng nhập để công cụ thu thập đọc được).
 
 ### shop-payment (svbe, container Docker)
 

@@ -43,8 +43,23 @@ Bật `APP_SIMULATION_ENABLED=true`. Vào **Quản trị → Mô phỏng sự c�
 | `HIGH_CPU` | Trang sản phẩm tính gợi ý tốn CPU | CPU tiến trình backend, hotspot ở `CatalogService.related` |
 | `MEMORY_LEAK` | Mỗi request giữ lại bộ nhớ (có giới hạn) | Heap tăng, GC tăng; nút "Giải phóng bộ nhớ" |
 | `FRONTEND_ERROR` | Nút "Thêm vào giỏ" ném `TypeError` | Lỗi JavaScript phía trình duyệt; khách không thêm được hàng |
+| `PAYMENT_BUSINESS_ERROR` | Cổng thanh toán trả **HTTP 200** nhưng body có `responseCode` 99/68/12 (kiểu core banking), kèm header `X-Response-Code`; backend coi là thất bại: đơn "Thanh toán thất bại", hoàn kho | Call sang cổng thanh toán vẫn **hiện thành công** cho tới khi cấu hình bắt header `X-Response-Code` / đánh dấu lỗi theo log (`Core banking responded code ...` mức WARN); tỷ lệ thanh toán thẻ thất bại trên trang Tổng quan tăng |
+| `ODD_STATUS` | Một tỷ lệ request của một nhóm API trả 423/402/451/429 với body `error`, `message` (423, 429 có `Retry-After: 30`) | Lọc request theo mã trạng thái HTTP; các mã này không lẫn với lỗi thật |
+| `READINESS_FAIL` | `/actuator/health/readiness` báo DOWN, liveness vẫn UP (tiến trình không bị khởi động lại) | Health check / sự kiện mất khả năng phục vụ; target `rhel-3vm`: bộ kiểm tra trên máy web loại backend khỏi vòng phục vụ sau ~10 giây, `/api` trả 503 "đang bảo trì", tắt kịch bản thì ~5 giây sau phục vụ lại |
+| `EMIT_PII` | Thanh toán thẻ đính dữ liệu **giả** cố định vào URL (`customer.email`, `payment.card_number`, `payment.card_cvv`), header (`X-Customer-Email`, `X-Card-Number`, `X-Card-Cvv`) của lệnh gọi sang cổng thanh toán và vào log | Trace (URL, header của call sang cổng thanh toán) và log hiện số thẻ khi chưa cấu hình che; cấu hình che xong thì biến mất |
+| `METRIC_CARDINALITY` | Counter `shop.request.tagged` gắn tag `request_ref` khác nhau mỗi request; dừng ở ngưỡng (tối đa 5.000 series), tắt thì xoá hết | Số series của metric tăng vọt rồi dừng (`/actuator/prometheus` cổng 8081 phình từ ~30 KB lên ~450 KB); trang Mô phỏng sự cố hiện số series |
 
 Nhóm API: `ALL`, `CATALOG`, `CART`, `CHECKOUT`, `ACCOUNT`, `ADMIN`.
+
+Tham số các kịch bản mới:
+
+| Kịch bản | Tham số (mặc định) |
+|---|---|
+| `PAYMENT_BUSINESS_ERROR` | `code`: `99` core bận / `68` tài khoản không đủ điều kiện / `12` sai định dạng (`99`); `percent` (40). Cổng thanh toán giữ cùng hạn tự tắt, và được tắt khi backend khởi động lại |
+| `ODD_STATUS` | `code`: 423 / 402 / 451 / 429 (423); `percent` (40); `target` (`ALL`) |
+| `METRIC_CARDINALITY` | `perRequest`: series mới mỗi request, 1-50 (10); `maxSeries`: ngưỡng, tối đa 5000 (5000) |
+
+Dữ liệu của `EMIT_PII` **luôn là dữ liệu giả cố định**: số thẻ test công khai `4111111111111111`, email `demo@example.com`, CVV `000`; không lấy từ dữ liệu khách nhập.
 
 API tương ứng (cần token quản trị):
 
