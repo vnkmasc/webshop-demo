@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds the webshop application and packs it with this target's deployment files:
 #   release/shop-<version>.tar.gz
-#     backend/shop-backend.jar  payment/payment-gateway.jar + Containerfile  frontend/dist/  nginx/  deploy/
+#     backend/shop-backend.jar  payment/payment-gateway.jar + Containerfile  risk/  frontend/dist/  nginx/  deploy/
 # Usage: ./build-release.sh <version> [path/to/webshop]   (default: WEBSHOP_DIR or ../../../webshop)
 # Run on a build machine with JDK 21 and Node 22 (not on the VMs).
 set -euo pipefail
@@ -24,6 +24,8 @@ rm -rf "${OUT}"
 mkdir -p "${OUT}/backend" "${OUT}/payment" "${OUT}/frontend"
 cp "${APP}/backend/target/shop-backend.jar" "${OUT}/backend/"
 cp "${APP}/payment/target/payment-gateway.jar" "${APP}/payment/Containerfile" "${OUT}/payment/"
+# Python risk service: sources and Containerfile (the image is built on the app VM)
+(cd "${APP}" && tar --exclude='__pycache__' -cf - risk) | tar -C "${OUT}" -xf -
 cp -r "${APP}/frontend/dist" "${OUT}/frontend/dist"
 cp -r "${HERE}/nginx" "${HERE}/deploy" "${OUT}/"
 {

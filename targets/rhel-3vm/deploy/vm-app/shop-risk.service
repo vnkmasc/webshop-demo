@@ -1,0 +1,26 @@
+# Order risk scoring service (Python) in a Docker container, supervised by systemd.
+# The container is recreated on every start from the image tagged shop-risk:current (built by deploy.sh risk).
+[Unit]
+Description=Sai Buoc order risk scoring (Docker container)
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Generated from /etc/shop/app.env by shop-container-env.
+ExecStartPre=-/usr/bin/docker rm -f shop-risk
+ExecStart=/usr/bin/docker run --rm --name shop-risk \
+    --env-file /etc/shop/risk.env \
+    -p 127.0.0.1:8095:8095 \
+    --log-driver journald \
+    shop-risk:current
+ExecStop=/usr/bin/docker stop -t 15 shop-risk
+Restart=always
+RestartSec=5
+TimeoutStartSec=60
+TimeoutStopSec=30
+SyslogIdentifier=shop-risk
+
+[Install]
+WantedBy=multi-user.target

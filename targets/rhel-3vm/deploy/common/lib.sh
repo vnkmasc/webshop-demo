@@ -55,21 +55,29 @@ ensure_firewalld() {
     pkg_install firewalld >/dev/null
     systemctl enable --now firewalld >/dev/null
     firewall-cmd --permanent --add-service=ssh >/dev/null
+    firewall-cmd --add-service=ssh >/dev/null
 }
+
+# Rules are added to the permanent configuration AND to the running one; firewalld is never reloaded.
+# `firewall-cmd --reload` on these RHEL 9 hosts can fail half-way ("dictionary changed size during iteration",
+# seen after timed rules had existed) and leave the host unreachable, even over SSH.
 
 # fw_allow_from SOURCE PORT: only SOURCE (IP or CIDR) may reach PORT/tcp. Idempotent.
 fw_allow_from() {
     local rule="rule family=\"ipv4\" source address=\"$1\" port port=\"$2\" protocol=\"tcp\" accept"
     firewall-cmd --permanent --query-rich-rule="${rule}" >/dev/null 2>&1 \
         || firewall-cmd --permanent --add-rich-rule="${rule}" >/dev/null
+    firewall-cmd --query-rich-rule="${rule}" >/dev/null 2>&1 \
+        || firewall-cmd --add-rich-rule="${rule}" >/dev/null
 }
 
 # fw_allow_service NAME: open a service (http, https...) to everyone.
 fw_allow_service() {
     firewall-cmd --permanent --add-service="$1" >/dev/null
+    firewall-cmd --add-service="$1" >/dev/null
 }
 
+# Shows the resulting rules. Deliberately no reload (see above).
 fw_apply() {
-    firewall-cmd --reload >/dev/null
     firewall-cmd --list-all
 }

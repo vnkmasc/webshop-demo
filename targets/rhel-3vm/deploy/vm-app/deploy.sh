@@ -2,15 +2,16 @@
 # Deploys a new version of one service and rolls back automatically when it does not become healthy.
 #   sudo ./deploy.sh backend path/to/shop-backend.jar     (Java process managed by systemd)
 #   sudo ./deploy.sh payment path/to/payment-gateway.jar  (Docker image built here, container run by systemd)
+#   sudo ./deploy.sh risk path/to/risk                    (directory with the Python service and its Containerfile)
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source-path=SCRIPTDIR source=../common/lib.sh
 source "${HERE}/../common/lib.sh"
 require_root
 
-SERVICE="${1:?usage: deploy.sh backend|payment path/to/jar}"
-JAR="${2:?usage: deploy.sh backend|payment path/to/jar}"
-[[ -f "${JAR}" ]] || die "${JAR} not found"
+SERVICE="${1:?usage: deploy.sh backend|payment|risk path}"
+JAR="${2:?usage: deploy.sh backend|payment|risk path}"
+[[ -e "${JAR}" ]] || die "${JAR} not found"
 WAIT_SECONDS="${WAIT_SECONDS:-300}"
 IMAGE=shop-payment
 
@@ -99,8 +100,51 @@ deploy_payment() {
     die "Deployment failed"
 }
 
+# Python risk service: image built from the service directory (it runs its unit tests during the build).
+deploy_risk() {
+    local dir="${JAR%/}" image=shop-risk health=http://127.0.0.1:8095/healthz tag extra=""
+    [[ -f "${dir}/Containerfile" ]] || die "${dir}/Containerfile not found"
+    if [[ -f /etc/shop/app.env ]]; then
+        # shellcheck disable=SC1091
+        extra="$(set -a; source /etc/shop/app.env >/dev/null 2>&1; echo "${RISK_EXTRA_PIP_PACKAGES:-}")"
+    fi
+    tag="$(date +%Y%m%d%H%M%S)"
+    log "Building image ${image}:${tag}${extra:+ (extra packages: ${extra})}"
+    docker build -q --build-arg EXTRA_PIP_PACKAGES="${extra}" -t "${image}:${tag}" -f "${dir}/Containerfile" "${dir}" >/dev/null \
+        || die "Image build failed (unit tests run during the build)"
+    local had_current=false
+    if docker image inspect "${image}:current" >/dev/null 2>&1; then
+        docker tag "${image}:current" "${image}:prev"
+        had_current=true
+    fi
+    docker tag "${image}:${tag}" "${image}:current"
+    /usr/local/sbin/shop-container-env
+    log "Restarting shop-risk (container)"
+    systemctl restart shop-risk
+    if wait_healthy "${health}"; then
+        log "shop-risk is healthy: $(curl -fs "${health}" || true)"
+        docker images --format '{{.Tag}}' "${image}" | grep -E '^[0-9]{14}$' | sort -r | tail -n +4 \
+            | xargs -r -I{} docker rmi "${image}:{}" >/dev/null 2>&1 || true
+        return 0
+    fi
+    warn "shop-risk did not become healthy within ${WAIT_SECONDS}s; last log lines:"
+    journalctl -u shop-risk -n 40 --no-pager || true
+    if [[ "${had_current}" == true ]]; then
+        warn "Rolling back to the previous image"
+        docker tag "${image}:prev" "${image}:current"
+        systemctl restart shop-risk
+        if wait_healthy "${health}"; then
+            warn "Rolled back successfully"
+        else
+            die "Rollback also failed - check the logs"
+        fi
+    fi
+    die "Deployment failed"
+}
+
 case "${SERVICE}" in
     backend) deploy_backend ;;
     payment) deploy_payment ;;
-    *) die "unknown service ${SERVICE} (backend|payment)" ;;
+    risk) deploy_risk ;;
+    *) die "unknown service ${SERVICE} (backend|payment|risk)" ;;
 esac

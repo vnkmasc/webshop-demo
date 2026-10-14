@@ -2,6 +2,7 @@
 # Application VM (RHEL 9). Idempotent.
 #   shop-backend: Java process managed by systemd (OpenJDK 21 from AppStream)
 #   shop-payment: Docker container (Docker CE from download.docker.com) supervised by systemd
+#   shop-risk:    Docker container (Python risk scoring) supervised by systemd
 # Usage: sudo ./install.sh [/etc/shop/app.env]
 # Then deploy: sudo ./deploy.sh payment ../../payment/payment-gateway.jar
 #              sudo ./deploy.sh backend ../../backend/shop-backend.jar
@@ -39,8 +40,11 @@ fi
 pkg_install --allowerasing docker-ce docker-ce-cli containerd.io
 systemctl enable --now docker >/dev/null
 docker --version
-log "Pulling the payment container base image"
+log "Pulling the container base images"
 docker pull -q "$(awk '/^FROM /{print $2; exit}' "${HERE}/../../payment/Containerfile")" >/dev/null
+if [[ -f "${HERE}/../../risk/Containerfile" ]]; then
+    docker pull -q "$(awk '/^FROM /{print $2; exit}' "${HERE}/../../risk/Containerfile")" >/dev/null
+fi
 
 log "Creating user and directories"
 id shop >/dev/null 2>&1 || useradd --system --home-dir /opt/shop --shell /sbin/nologin shop
@@ -62,11 +66,12 @@ elif [[ -f /etc/systemd/system/shop-payment.service ]] && ! grep -q 'docker run'
     warn "Replacing the old shop-payment Java service with the container"
     systemctl disable --now shop-payment >/dev/null 2>&1 || true
 fi
-install -m 755 "${HERE}/payment-env.sh" /usr/local/sbin/shop-payment-env
-/usr/local/sbin/shop-payment-env
-install -m 644 "${HERE}/shop-payment.service" /etc/systemd/system/shop-payment.service
+install -m 755 "${HERE}/payment-env.sh" /usr/local/sbin/shop-container-env
+ln -sfn shop-container-env /usr/local/sbin/shop-payment-env
+/usr/local/sbin/shop-container-env
+install -m 644 "${HERE}/shop-payment.service" "${HERE}/shop-risk.service" /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable shop-payment >/dev/null
+systemctl enable shop-payment shop-risk >/dev/null
 
 log "Checking connectivity to the database VM"
 if timeout 5 bash -c "</dev/tcp/${DB_HOST}/${DB_PORT:-5432}"; then
@@ -82,4 +87,4 @@ fw_allow_from "${ADMIN_SUBNET}" 8081
 fw_allow_from "${FRONTEND_HOST}" 8081   # readiness checks from the web VM
 fw_apply
 
-log "Application VM prepared. Deploy with: sudo ${HERE}/deploy.sh payment|backend <jar>"
+log "Application VM prepared. Deploy with: sudo ${HERE}/deploy.sh payment|backend <jar>  /  deploy.sh risk <risk dir>"
