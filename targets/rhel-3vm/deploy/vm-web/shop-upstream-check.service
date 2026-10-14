@@ -1,0 +1,7 @@
+[Unit]
+Description=Sai Buoc backend readiness check for nginx (one run)
+After=nginx.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/shop-upstream-check

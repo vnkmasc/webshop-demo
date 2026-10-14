@@ -1,0 +1,10 @@
+[Unit]
+Description=Check backend readiness every 5 seconds
+
+[Timer]
+OnBootSec=10s
+OnUnitActiveSec=5s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
