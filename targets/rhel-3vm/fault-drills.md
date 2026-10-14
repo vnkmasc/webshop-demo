@@ -79,6 +79,9 @@ status() { curl -s -H "Authorization: Bearer $TOKEN" http://$WEB/api/admin/simul
 | Mã HTTP lạ: 423 ở 40% request đặt hàng | `sim ODD_STATUS '{"active":true,"durationMinutes":30,"params":{"code":423,"target":"CHECKOUT","percent":40}}'` | `sim ODD_STATUS '{"active":false}'` |
 | Readiness hỏng (máy web loại backend sau ~10 giây) | `sim READINESS_FAIL '{"active":true,"durationMinutes":10}'` | xem ghi chú bên dưới bảng |
 | Lộ dữ liệu nhạy cảm giả | `sim EMIT_PII '{"active":true,"durationMinutes":30}'` | `sim EMIT_PII '{"active":false}'` |
+| Dịch vụ rủi ro (Python) chậm 2 giây | `sim RISK_SLOW '{"active":true,"durationMinutes":30,"params":{"delayMs":2000}}'` | `sim RISK_SLOW '{"active":false}'` |
+| Dịch vụ rủi ro lỗi 30% | `sim RISK_ERROR '{"active":true,"durationMinutes":30,"params":{"percent":30}}'` | `sim RISK_ERROR '{"active":false}'` |
+| Dịch vụ rủi ro quá thời gian chờ (5 giây > timeout 3 giây) | `sim RISK_TIMEOUT '{"active":true,"durationMinutes":30,"params":{"delayMs":5000}}'` | `sim RISK_TIMEOUT '{"active":false}'` |
 | Nổ cardinality metric (tối đa 5.000 series) | `sim METRIC_CARDINALITY '{"active":true,"durationMinutes":30,"params":{"perRequest":10}}'` | `sim METRIC_CARDINALITY '{"active":false}'` |
 
 Khi `READINESS_FAIL` đang bật, `/api` qua nginx trả 503 nên **không tắt được qua `http://$WEB`**. Tắt bằng cách gọi thẳng backend trên svbe, hoặc chờ hết `durationMinutes`:
@@ -217,6 +220,14 @@ ssh root@$APP 'systemctl stop shop-payment'
 - **Hiện tượng:** mọi đơn thẻ thất bại ngay (kết nối bị từ chối), đơn chuyển "Thanh toán thất bại", tồn kho được hoàn; COD bình thường. Trang **Quản trị → Cổng thanh toán** báo không kết nối được.
 - **Khôi phục:** `ssh root@$APP 'systemctl start shop-payment'` (~25 giây).
 
+### 3.5a Dừng dịch vụ chấm điểm rủi ro (phụ trợ)
+
+```bash
+ssh root@$APP 'systemctl stop shop-risk'
+```
+- **Hiện tượng:** đơn vẫn đặt được bình thường nhưng không có điểm rủi ro; backend ghi WARN `Risk service failed ... Connection refused`; call sang dịch vụ Python lỗi trên trace.
+- **Khôi phục:** `ssh root@$APP 'systemctl start shop-risk'`
+
 ### 3.5 CPU máy ứng dụng bão hòa (tiến trình khác giành CPU)
 
 Mỗi vCPU một tiến trình `yes`, tự dừng sau 10 phút:
@@ -301,13 +312,14 @@ Khi không chắc còn gì đang bật (không dùng `firewall-cmd --reload`, xe
 ```bash
 # Ứng dụng: tắt mọi kịch bản và đưa cổng thanh toán về bình thường (cần TOKEN ở mục 1)
 for s in LATENCY HTTP_ERROR SLOW_SQL N_PLUS_ONE POOL_EXHAUSTION HIGH_CPU MEMORY_LEAK FRONTEND_ERROR \
-         PAYMENT_BUSINESS_ERROR ODD_STATUS READINESS_FAIL EMIT_PII METRIC_CARDINALITY; do sim $s '{"active":false}'; done
+         PAYMENT_BUSINESS_ERROR ODD_STATUS READINESS_FAIL EMIT_PII METRIC_CARDINALITY \
+         RISK_SLOW RISK_ERROR RISK_TIMEOUT; do sim $s '{"active":false}'; done
 gateway '{"baseLatencyMs":250,"extraLatencyMs":0,"errorRatePercent":0,"declineRatePercent":3,"outage":false}'
 
 # Hạ tầng
 ssh root@$DB  "firewall-cmd --remove-rich-rule='rule family=\"ipv4\" source address=\"$APP\" port port=\"5432\" protocol=\"tcp\" drop' 2>/dev/null; tc qdisc del dev $IFACE root 2>/dev/null; rm -f /var/tmp/disk-fill.img; systemctl start postgresql; \
                runuser -u postgres -- psql -qc \"SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE query LIKE '%generate_series(1, 1e12)%' AND pid <> pg_backend_pid()\""
-ssh root@$APP "firewall-cmd --remove-rich-rule='rule family=\"ipv4\" source address=\"$WEB\" port port=\"8080\" protocol=\"tcp\" drop' 2>/dev/null; tc qdisc del dev $IFACE root 2>/dev/null; pkill -x yes; pkill -f 'bytearray(3'; systemctl start shop-payment shop-backend"
+ssh root@$APP "firewall-cmd --remove-rich-rule='rule family=\"ipv4\" source address=\"$WEB\" port port=\"8080\" protocol=\"tcp\" drop' 2>/dev/null; tc qdisc del dev $IFACE root 2>/dev/null; pkill -x yes; pkill -f 'bytearray(3'; systemctl start shop-payment shop-risk shop-backend"
 ssh root@$WEB 'systemctl start nginx'
 
 # Tải về mức nền

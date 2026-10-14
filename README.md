@@ -2,10 +2,13 @@
 
 Bộ công cụ để **triển khai và chạy demo** ứng dụng [webshop](https://github.com/vnkmasc/webshop) (cửa hàng giày Sải Bước) trên các hạ tầng khác nhau, dùng chung cho mọi hệ thống giám sát.
 
+**Mới dùng lần đầu? Đọc [START-HERE.md](START-HERE.md).**
+
 Repo này **không chứa mã nguồn ứng dụng**. Mã nguồn, cấu hình và cách build nằm ở repo `webshop`; ở đây chỉ có: cách triển khai theo từng loại hạ tầng (target), kịch bản tải, kịch bản sự cố và kiểm thử đầu-cuối.
 
 ```
 webshop-demo/
+├── START-HERE.md         Xem gì, đọc gì, làm gì, test gì - cho người mới
 ├── targets/
 │   └── rhel-3vm/         Ba máy RHEL 9: web (nginx) / ứng dụng (backend + payment container) / CSDL (PostgreSQL)
 │       ├── README.md       Hướng dẫn triển khai
@@ -39,4 +42,4 @@ Yêu cầu chung của ứng dụng khi demo: `APP_SEED_ENABLED=true` (dữ li�
 
 | Target | Mô tả | Trạng thái |
 |---|---|---|
-| [`rhel-3vm`](targets/rhel-3vm/README.md) | 3 máy RHEL 9.x; backend chạy bằng systemd, cổng thanh toán chạy bằng Docker CE, PostgreSQL 16 từ AppStream, nginx | Đang dùng (svfrt / svbe / svdb) |
+| [`rhel-3vm`](targets/rhel-3vm/README.md) | 3 máy RHEL 9.x; backend Java chạy bằng systemd, cổng thanh toán (Java) và chấm điểm rủi ro (Python) chạy bằng Docker CE, PostgreSQL 16 từ AppStream, nginx kèm kiểm tra readiness | Đang dùng (svfrt / svbe / svdb) |

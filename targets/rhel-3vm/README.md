@@ -61,6 +61,22 @@ Hai kiểu chạy trên cùng máy:
 
 `install.sh` cài Docker CE từ repo chính thức `download.docker.com` (gói `containerd.io` thay gói `runc` của RHEL), tải image nền, sinh `/etc/shop/payment.env` từ `app.env` (lệnh `shop-payment-env`) và cài unit `shop-payment.service`. Nếu máy đang chạy cách cũ (service Java hoặc unit Podman/Quadlet), script tự gỡ. Máy ứng dụng cần ra được Internet tới `download.docker.com` và `registry.access.redhat.com`.
 
+### Dịch vụ chấm điểm rủi ro (Python)
+
+```bash
+./deploy/vm-app/deploy.sh risk risk        # build image từ thư mục risk/ (chạy unit test khi build), chạy container shop-risk
+```
+
+Python **không tự được gắn agent như Java**. Tuỳ công cụ giám sát:
+
+| Công cụ | Cần làm |
+|---|---|
+| Instana | Trong `app.env`: `RISK_EXTRA_PIP_PACKAGES=instana` và `RISK_AUTOWRAPT_BOOTSTRAP=instana`, rồi `deploy.sh risk risk` (build lại image có gói `instana`) |
+| Dynatrace | OneAgent trên host; bật **Settings → Preferences → OneAgent features → Python** và **Python FastAPI [Opt-In]**, rồi `systemctl restart shop-risk`. Không cần đổi image |
+| Công cụ khác | Gói Python của công cụ qua `RISK_EXTRA_PIP_PACKAGES`, biến khởi động qua `RISK_AUTOWRAPT_BOOTSTRAP` (nếu công cụ dùng autowrapt) |
+
+Kiểm tra: một trace đặt hàng phải đi từ nginx → backend (Java) → **risk (Python)** → quay về; bật kịch bản `RISK_SLOW` thì thời gian chờ nằm ở dịch vụ Python.
+
 ## 4. Máy web
 
 ```bash

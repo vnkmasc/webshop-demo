@@ -22,6 +22,7 @@ Tài liệu này liệt kê **mọi thành phần chạy nền** của hệ th�
 | svbe | Backend cửa hàng | systemd service (Java) | `shop-backend` | 8080, 8081 (health) | Có |
 | svbe | Docker Engine (Docker CE) | systemd service | `docker`, `containerd` | - | Có |
 | svbe | Cổng thanh toán | **container Docker**, systemd chạy `docker run` | `shop-payment` (container cùng tên) | 127.0.0.1:8090 | Có |
+| svbe | Chấm điểm rủi ro đơn hàng (Python 3.11, FastAPI) | **container Docker**, systemd chạy `docker run` | `shop-risk` (container cùng tên) | 127.0.0.1:8095 | Có |
 | svdb | PostgreSQL 16 (`shop`, `payments`) | systemd service | `postgresql` | 5432 | Có |
 | svdb | Backup database 02:30 hằng ngày | cron | `/etc/cron.d/shop-db-backup` | - | Có |
 | svdb | Dọn đơn do tải tạo ra, quá 2 ngày, 03:00 hằng ngày | cron | `/etc/cron.d/shop-load-cleanup` | - | Có |
@@ -105,6 +106,26 @@ Docker Engine: `systemctl status docker`. Docker CE cài từ repo `download.doc
 
 Vì sao Docker mà không phải Podman: RHEL 9.8 đi kèm crun 1.27, ngoài dải phiên bản mà công cụ giám sát hỗ trợ tự gắn vào container Podman (crun 0.17-1.15); container Docker (runc) thì được hỗ trợ.
 
+### shop-risk (svbe, container Docker, Python)
+
+Dịch vụ chấm điểm rủi ro: backend gọi khi khách đặt hàng (timeout 3 giây). **Phụ trợ**: tắt dịch vụ này thì đơn vẫn đặt được, chỉ không có điểm rủi ro.
+
+```bash
+systemctl status shop-risk
+systemctl stop shop-risk          # đơn vẫn đặt được, backend ghi WARN "Risk service failed"
+systemctl start shop-risk
+curl -s http://127.0.0.1:8095/healthz
+docker logs -f shop-risk          # mỗi đơn: "Scored order ... -> 70 HIGH ..." kèm rid (X-Request-Id)
+docker images shop-risk           # :current, :prev, tag thời gian (deploy.sh risk)
+```
+
+| File | Nội dung |
+|---|---|
+| `/etc/systemd/system/shop-risk.service` | Lệnh `docker run` |
+| `/etc/shop/risk.env` | Sinh từ `/etc/shop/app.env` bằng `shop-container-env` (`RISK_API_KEY`, phiên bản, `AUTOWRAPT_BOOTSTRAP` nếu có) |
+
+Cấu hình phía backend trong `app.env`: `APP_RISK_URL` (để trống = không chấm điểm), `RISK_API_KEY`. Đơn rủi ro cao hiện nhãn "Cần kiểm tra" ở **Quản trị → Đơn hàng** (lọc được theo mức rủi ro).
+
 ### PostgreSQL (svdb)
 
 ```bash
@@ -161,7 +182,7 @@ Tải giả lập tạo đơn hàng thật trong database (ghi chú `k6`); nhóm
 ```bash
 systemctl --user disable --now shop-load                                 # control-plane
 ssh root@192.168.50.64 'systemctl disable --now nginx'
-ssh root@192.168.50.65 'systemctl disable --now shop-backend shop-payment'
+ssh root@192.168.50.65 'systemctl disable --now shop-backend shop-payment shop-risk'
 ssh root@192.168.50.66 'systemctl disable --now postgresql; mv /etc/cron.d/shop-db-backup /etc/cron.d/shop-load-cleanup /root/ 2>/dev/null'
 ```
 
@@ -169,7 +190,7 @@ Bật lại theo thứ tự CSDL → ứng dụng → web → tải:
 
 ```bash
 ssh root@192.168.50.66 'systemctl enable --now postgresql; mv /root/shop-db-backup /root/shop-load-cleanup /etc/cron.d/ 2>/dev/null'
-ssh root@192.168.50.65 'systemctl enable --now shop-payment shop-backend'
+ssh root@192.168.50.65 'systemctl enable --now shop-payment shop-risk shop-backend'
 ssh root@192.168.50.64 'systemctl enable --now nginx'
 systemctl --user enable --now shop-load
 ```

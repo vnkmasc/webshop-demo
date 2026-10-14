@@ -47,6 +47,9 @@ Bật `APP_SIMULATION_ENABLED=true`. Vào **Quản trị → Mô phỏng sự c�
 | `ODD_STATUS` | Một tỷ lệ request của một nhóm API trả 423/402/451/429 với body `error`, `message` (423, 429 có `Retry-After: 30`) | Lọc request theo mã trạng thái HTTP; các mã này không lẫn với lỗi thật |
 | `READINESS_FAIL` | `/actuator/health/readiness` báo DOWN, liveness vẫn UP (tiến trình không bị khởi động lại) | Health check / sự kiện mất khả năng phục vụ; target `rhel-3vm`: bộ kiểm tra trên máy web loại backend khỏi vòng phục vụ sau ~10 giây, `/api` trả 503 "đang bảo trì", tắt kịch bản thì ~5 giây sau phục vụ lại |
 | `EMIT_PII` | Thanh toán thẻ đính dữ liệu **giả** cố định vào URL (`customer.email`, `payment.card_number`, `payment.card_cvv`), header (`X-Customer-Email`, `X-Card-Number`, `X-Card-Cvv`) của lệnh gọi sang cổng thanh toán và vào log | Trace (URL, header của call sang cổng thanh toán) và log hiện số thẻ khi chưa cấu hình che; cấu hình che xong thì biến mất |
+| `RISK_SLOW` | Dịch vụ chấm điểm rủi ro (Python) trả lời chậm thêm `delayMs` (2000) | Thời gian đặt hàng tăng; trên trace, thời gian chờ nằm ở **dịch vụ Python**, không phải backend Java |
+| `RISK_ERROR` | `percent` (30) lời gọi chấm điểm trả 500 | Lỗi ở dịch vụ Python; backend ghi WARN "Risk service failed", **đơn vẫn đặt được** (không có điểm) |
+| `RISK_TIMEOUT` | Dịch vụ chấm điểm trả lời sau `delayMs` (5000), quá timeout 3 giây của backend | Đặt hàng chậm thêm ~3 giây, call sang dịch vụ Python bị cắt; đơn vẫn đặt được |
 | `METRIC_CARDINALITY` | Counter `shop.request.tagged` gắn tag `request_ref` khác nhau mỗi request; dừng ở ngưỡng (tối đa 5.000 series), tắt thì xoá hết | Số series của metric tăng vọt rồi dừng (`/actuator/prometheus` cổng 8081 phình từ ~30 KB lên ~450 KB); trang Mô phỏng sự cố hiện số series |
 
 Nhóm API: `ALL`, `CATALOG`, `CART`, `CHECKOUT`, `ACCOUNT`, `ADMIN`.
