@@ -6,13 +6,37 @@ Cần ứng dụng chạy với `APP_SEED_ENABLED=true` (tài khoản mẫu, s�
 
 ## 1. Tải giả lập (k6)
 
-Tải giả lập nằm ở `loadgen/` của repo `webshop`: hành vi, biến cấu hình, cách chạy một lần, build image, chạy trên Kubernetes hoặc systemd đều ở [loadgen/README.md](https://github.com/vnkmasc/webshop/blob/main/loadgen/README.md). Tóm tắt:
+Chạy từ một máy riêng, không đặt trên ba máy của cửa hàng.
 
-- **Người dùng ảo** (`VUS`): phần lớn xem và tìm sản phẩm; một phần mua hàng (`BUY_PERCENT`), đăng nhập xem đơn, tra cứu, quản trị (xử lý đơn, nhập hàng).
-- **Đặt hàng đều đặn** (`ORDERS_PER_MIN` lượt/phút, `CARD_PERCENT`% trả bằng thẻ): luồng giữ cho thanh toán, chấm điểm rủi ro và hàng đợi luôn có việc.
-- Mọi đơn do tải tạo có ghi chú `k6` để phân biệt và dọn (target `rhel-3vm`: lịch `shop-load-cleanup` trên máy CSDL).
+```bash
+cd load
+ADMIN_PASSWORD='<APP_ADMIN_PASSWORD>' ./run.sh http://shop.example.com smoke          # 1 người dùng, 1 phút
+ADMIN_PASSWORD='<APP_ADMIN_PASSWORD>' ./run.sh http://shop.example.com steady 10 2h    # 10 người dùng, 2 giờ
+ADMIN_PASSWORD='<APP_ADMIN_PASSWORD>' ./run.sh http://shop.example.com spike 10        # tăng đột biến lên 30
+```
 
-Tải nền chạy liên tục nên để nhẹ; chỉ tăng lên mức demo khi demo. Mức tải của từng target: tài liệu vận hành của target đó (`rhel-3vm`: [operations.md](../targets/rhel-3vm/operations.md#tải-giả-lập-k6-cụm-kubernetes)).
+| Nhóm | Tỷ lệ | Hành vi |
+|---|---|---|
+| Xem hàng | 55% | Trang chủ → danh mục / tìm kiếm / lọc size → 1-3 trang sản phẩm |
+| Mua hàng | 25% | Xem hàng → báo giá giỏ (đôi khi có mã giảm giá) → 70% đặt hàng: COD hoặc thẻ (một số thẻ bị từ chối) |
+| Khách quen | 10% | Đăng nhập `loadNN@saibuoc.vn` → lịch sử đơn → chi tiết đơn |
+| Tra cứu | 5% | Tra cứu đơn bằng mã và số điện thoại |
+| Quản trị | 5% | Tổng quan → xác nhận / giao / hoàn tất đơn → nhập thêm hàng cho size đã hết |
+
+Tỷ lệ mỗi nhóm đổi được bằng biến môi trường: `BUY_PERCENT` (mặc định 25), `CUSTOMER_PERCENT` (10), `TRACK_PERCENT` (5), `ADMIN_PERCENT` (5); phần còn lại là xem hàng.
+
+Các nhóm trên chủ yếu xem và tìm sản phẩm: đặt hàng chỉ chiếm vài phần trăm số request. Vì vậy có thêm luồng **đặt hàng đều đặn** chạy song song: `ORDERS_PER_MIN` lượt mỗi phút (mặc định 6, 0 = tắt), mỗi lượt: xem sản phẩm → báo giá giỏ → đặt hàng (`CARD_PERCENT`, mặc định 50% trả bằng thẻ; 30% đặt khi đã đăng nhập `loadNN`) → tra cứu lại đơn vừa đặt. Đây là luồng giữ cho thanh toán, chấm điểm rủi ro và hàng đợi Kafka luôn có việc.
+
+Tải nền chạy liên tục nên để nhẹ (`VUS=2 BUY_PERCENT=2 ORDERS_PER_MIN=1`, ~60 request/phút, ~70 đơn/giờ); khi demo tăng lên `VUS=10 BUY_PERCENT=25 ORDERS_PER_MIN=10`.
+
+Mọi đơn do kịch bản tạo có ghi chú `k6` để phân biệt và dọn (target `rhel-3vm`: lịch `shop-load-cleanup` trên máy CSDL).
+
+Chỉ số riêng: `orders_placed`, `orders_payment_failed`, `checkout_duration`. Tải nền liên tục, chọn một trong ba cách:
+- **Kubernetes**: image build từ `load/Containerfile` (`load/build-image.sh`), triển khai bằng `load/k8s/deploy.sh` (manifest `load/k8s/shop-load.yaml`). Mức tải nằm trong ConfigMap `shop-load`.
+- `load/shop-load.service`: systemd hệ thống.
+- `load/shop-load.user.service`: systemd của một user, không cần root.
+
+Hướng dẫn nằm trong từng file.
 
 ## 2. Mô phỏng sự cố
 
@@ -83,11 +107,11 @@ systemctl stop shop-backend        # máy ứng dụng: nginx trả 502
 
 Một kịch bản chỉ gây hậu quả khi **có request đi qua**. Bật sự cố lúc không có tải (hoặc tải chỉ bắt đầu sau khi kịch bản đã hết hạn) thì không có gì để phát hiện.
 
-- **Luôn chạy tải nền trước**, rồi mới bật kịch bản. Kiểm tra: `kubectl -n shop-loadgen get pods` (target `rhel-3vm`).
+- **Luôn chạy tải nền trước**, rồi mới bật kịch bản. Kiểm tra: `kubectl -n shop-load get pods` (target `rhel-3vm`) hoặc `systemctl --user is-active shop-load` nếu chạy bằng systemd.
 - **Đặt thời lượng kịch bản đủ dài**, 20-30 phút. Các cơ chế phát hiện bất thường cần sự cố kéo dài nhiều phút liên tục, không tính đột biến ngắn.
 - **Dịch vụ mới cần thời gian học mức bình thường.** Cảnh báo dựa trên baseline tự học (tỷ lệ lỗi, tải tăng/giảm) cần dữ liệu từ khoảng hơn một ngày đến một tuần. Mỗi lần đổi cách chạy một dịch vụ (ví dụ chuyển sang container), hệ thống giám sát có thể coi đó là dịch vụ mới và học lại từ đầu, nên hạn chế thay đổi hạ tầng sát ngày demo.
 - **Cảnh báo theo ngưỡng cố định hoạt động ngay**, không cần học: CPU host bão hòa, hết bộ nhớ, tiến trình hoặc dịch vụ ngừng hoạt động. Để có cảnh báo ngay trong ngày đầu, ưu tiên các kịch bản: `HIGH_CPU` với `cpuMs` 4000-5000 (đẩy CPU máy ứng dụng lên gần 100%), dừng hẳn `shop-payment` hoặc `shop-backend`, hoặc đặt ngưỡng thời gian phản hồi / tỷ lệ lỗi cố định cho dịch vụ trong cấu hình phát hiện bất thường.
-- Dịch vụ có ít request (dưới khoảng 10 request/phút) có thể bị bỏ qua để tránh báo nhiễu. Ở mức tải nền, cổng thanh toán chỉ nhận khoảng 1 request/phút; trước khi demo sự cố thanh toán, chuyển sang mức demo (tổng 10 người dùng ảo, 10 đơn/phút, cổng thanh toán ~8 request/phút) hoặc tăng riêng `ORDERS_PER_MIN`.
+- Dịch vụ có ít request (dưới khoảng 10 request/phút) có thể bị bỏ qua để tránh báo nhiễu. Ở mức tải nền, backend nhận ~55 request/phút nhưng cổng thanh toán gần như không có request; trước khi demo sự cố thanh toán, chuyển sang mức demo (`VUS=10 BUY_PERCENT=25 ORDERS_PER_MIN=10`, cổng thanh toán ~8 request/phút) hoặc tăng riêng `ORDERS_PER_MIN`.
 
 ## 5. Gợi ý một buổi demo
 

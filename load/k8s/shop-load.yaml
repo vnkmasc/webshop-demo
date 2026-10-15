@@ -1,0 +1,66 @@
+# Background load on Kubernetes. Apply with ./deploy.sh (it also creates the secret), or by hand:
+#   kubectl apply -f shop-load.yaml
+#   kubectl -n shop-load create secret generic shop-load --from-literal=ADMIN_PASSWORD=...
+# Change the level: edit the ConfigMap (kubectl -n shop-load edit cm shop-load), then
+#   kubectl -n shop-load rollout restart deploy/shop-load
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shop-load
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shop-load
+  namespace: shop-load
+data:
+  BASE_URL: http://shop.example.com
+  PROFILE: steady
+  DURATION: 8760h
+  # Background level. Demo level: VUS=10, BUY_PERCENT=25, ORDERS_PER_MIN=10.
+  VUS: "2"
+  BUY_PERCENT: "2"
+  ORDERS_PER_MIN: "1"
+  CARD_PERCENT: "50"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shop-load
+  namespace: shop-load
+  labels:
+    app: shop-load
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: shop-load
+  template:
+    metadata:
+      labels:
+        app: shop-load
+    spec:
+      containers:
+        - name: k6
+          image: localhost/shop-load:current
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: shop-load
+            - secretRef:
+                name: shop-load
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

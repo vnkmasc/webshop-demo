@@ -7,7 +7,7 @@ Hướng dẫn cho người mới: **xem gì, đọc gì, làm gì, test gì**, 
 | svfrt | 192.168.50.64 | nginx (trang web) |
 | svbe | 192.168.50.65 | backend Java, cổng thanh toán (container), chấm điểm rủi ro Python (container) |
 | svdb | 192.168.50.66 | PostgreSQL, hàng đợi Kafka (topic `orders`) |
-| control-plane | 192.168.50.46 | master của cụm Kubernetes; tải giả lập k6 chạy thành 2 pod (namespace `shop-loadgen`) trên worker-1 và worker-2 |
+| control-plane | 192.168.50.46 | tải giả lập k6: pod trong namespace `shop-load` của cụm Kubernetes (user `cp`) |
 
 ## 1. Xem gì trước (10 phút): làm quen sản phẩm
 
@@ -40,7 +40,7 @@ Kịch bản dễ thấy nhất; làm được bài này là dùng được mọ
 
 1. **Tăng tải lên mức demo** (trên control-plane, user `cp`, dùng `kubectl`):
    ```bash
-   kubectl -n shop-loadgen patch cm shop-loadgen --type merge -p '{"data":{"VUS":"5","BUY_PERCENT":"25","ORDERS_PER_MIN":"5"}}' && kubectl -n shop-loadgen rollout restart deploy/shop-loadgen
+   kubectl -n shop-load patch cm shop-load --type merge -p '{"data":{"VUS":"10","BUY_PERCENT":"25","ORDERS_PER_MIN":"10"}}' && kubectl -n shop-load rollout restart deploy/shop-load
    ```
 2. Đợi ~10 phút, ghi lại thời gian phản hồi bình thường của `shop-backend` trên công cụ giám sát.
 3. **Quản trị → Mô phỏng sự cố**, bật thẻ **SQL chậm** (3000 ms, 30 phút).
@@ -51,7 +51,7 @@ Kịch bản dễ thấy nhất; làm được bài này là dùng được mọ
    - danh sách cảnh báo/problem: có thể có hoặc chưa (xem mục 4 của [scenarios/README.md](scenarios/README.md)).
 5. **Tắt** kịch bản, **trả tải** về mức nền:
    ```bash
-   kubectl -n shop-loadgen patch cm shop-loadgen --type merge -p '{"data":{"VUS":"1","BUY_PERCENT":"2","ORDERS_PER_MIN":"1"}}' && kubectl -n shop-loadgen rollout restart deploy/shop-loadgen
+   kubectl -n shop-load patch cm shop-load --type merge -p '{"data":{"VUS":"2","BUY_PERCENT":"2","ORDERS_PER_MIN":"1"}}' && kubectl -n shop-load rollout restart deploy/shop-load
    ```
 
 ## 4. Test gì tiếp: mỗi lần một kịch bản
@@ -76,5 +76,5 @@ Kịch bản dễ thấy nhất; làm được bài này là dùng được mọ
 - **Tải trước, sự cố sau.** Không có lưu lượng thì sự cố không ảnh hưởng ai, công cụ giám sát không có gì để thấy.
 - **Mỗi lần một kịch bản**, để **15-30 phút**, tắt hẳn rồi mới sang cái khác.
 - **Dịch vụ mới cần thời gian học**: cảnh báo tự động theo baseline cần từ hơn một ngày tới một tuần dữ liệu. Muốn có cảnh báo ngay, dùng ngưỡng cố định (CPU, tiến trình chết, đĩa đầy) hoặc tự đặt ngưỡng cho service.
-- Không thấy gì: kiểm tra `kubectl -n shop-loadgen get pods` trên control-plane (2 pod tải phải `Running`) và kịch bản đã bật đủ lâu chưa.
+- Không thấy gì: kiểm tra `kubectl -n shop-load get pods` trên control-plane (pod tải phải `Running`) và kịch bản đã bật đủ lâu chưa.
 - Kịch bản tự tắt khi hết thời gian; khởi động lại backend cũng tắt hết. Không chắc còn gì đang bật: [fault-drills.md mục 6](targets/rhel-3vm/fault-drills.md#6-khôi-phục-tất-cả).
