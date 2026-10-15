@@ -26,7 +26,7 @@ Tài liệu này liệt kê **mọi thành phần chạy nền** của hệ th�
 | svdb | Hàng đợi đơn hàng: Apache Kafka 4.3 (KRaft, 1 node), topic `orders` | systemd service (Java) | `kafka` | 9092 (chỉ svbe), 9093 (127.0.0.1) | Có |
 | svdb | Backup database 02:30 hằng ngày | cron | `/etc/cron.d/shop-db-backup` | - | Có |
 | svdb | Dọn đơn do tải tạo ra, quá 2 ngày, 03:00 hằng ngày | cron | `/etc/cron.d/shop-load-cleanup` | - | Có |
-| control-plane | Tải giả lập k6 (2 người dùng ảo, ~55 request/phút, ~10 đơn/giờ) | systemd **user** service của `cp` | `shop-load` | - | Có (linger bật) |
+| control-plane | Tải giả lập k6 (mức tải: xem mục Tải giả lập) | Pod Kubernetes, chạy trên node control-plane | namespace `shop-load`, deployment `shop-load` | - | Có (Kubernetes tự chạy lại) |
 
 Không có thành phần nào khác của hệ thống chạy nền.
 
@@ -37,7 +37,7 @@ Không có thành phần nào khác của hệ thống chạy nền.
 for h in 192.168.50.64 192.168.50.65 192.168.50.66; do
   ssh root@$h 'echo "== $(hostname)"; systemctl is-active nginx shop-backend shop-payment shop-risk postgresql kafka 2>/dev/null | paste -sd" "'
 done
-systemctl --user is-active shop-load
+kubectl -n shop-load get pods --no-headers
 curl -s -o /dev/null -w '%{http_code}\n' http://192.168.50.64/api/site-config    # 200 là chạy
 ```
 
@@ -155,43 +155,60 @@ runuser -u kafka -- $K/kafka-topics.sh --bootstrap-server 127.0.0.1:9092 --descr
 
 Firewall: cổng 9092 chỉ mở cho svbe. Không có xác thực (PLAINTEXT), chỉ dùng trong mạng nội bộ. Phía backend: `APP_KAFKA_BOOTSTRAP=192.168.50.66:9092` trong `app.env`; để trống là tắt hàng đợi (đơn không có trạng thái kho, kịch bản `KAFKA_*` không bật được). Đơn của tải bị lịch dọn xóa trước khi kho nhận (khi consumer chết lâu) thì kho bỏ qua sự kiện đó.
 
-### Tải giả lập k6 (control-plane, user `cp`)
+### Tải giả lập k6 (cụm Kubernetes, từ control-plane, user `cp`)
 
-Chạy dưới dạng systemd user service để có lưu lượng liên tục vào shop (các nhóm hành vi: [../../scenarios/README.md](../../scenarios/README.md)). File unit mẫu: [`load/shop-load.user.service`](../../load/shop-load.user.service).
+Tải chạy thành một pod trong cụm Kubernetes mà control-plane là master, để có lưu lượng liên tục vào shop (các nhóm hành vi: [../../scenarios/README.md](../../scenarios/README.md)). Cụm không có registry dùng chung, nên image được build trên control-plane, nạp thẳng vào containerd của node này, và pod được ghim vào node control-plane (`imagePullPolicy: Never`, chấp nhận taint control-plane).
 
 ```bash
-systemctl --user status shop-load
-systemctl --user stop shop-load        # dừng tải
-systemctl --user start shop-load
-systemctl --user disable --now shop-load   # dừng hẳn, không tự chạy lại
-journalctl --user -u shop-load -f
+kubectl -n shop-load get pods -o wide                         # Running là đang chạy
+kubectl -n shop-load logs -f deploy/shop-load                 # chỉ in lỗi (k6 chạy --quiet)
+kubectl -n shop-load scale deploy/shop-load --replicas=0      # dừng tải
+kubectl -n shop-load scale deploy/shop-load --replicas=1      # chạy lại
+kubectl delete ns shop-load                                   # gỡ hẳn
 ```
 
-| File | Nội dung |
+| Thành phần | Nội dung |
 |---|---|
-| `~/.config/systemd/user/shop-load.service` | Unit chạy `k6 run <repo webshop-demo>/load/shop.js` (bản sao của `load/shop-load.user.service`) |
-| `~/.config/shop-load/env` | `BASE_URL`, `PROFILE`, `VUS` (số người dùng ảo), `BUY_PERCENT` (tỷ lệ người dùng ảo mua hàng), `ORDERS_PER_MIN` (số đơn đặt đều đặn mỗi phút, 0 = tắt), `CARD_PERCENT` (tỷ lệ đơn trả bằng thẻ trong số đó, mặc định 50), `DURATION`, `ADMIN_PASSWORD` (chmod 600) |
-| `~/.local/bin/k6` | k6 (bản tải từ GitHub releases) |
+| Image `localhost/shop-load:current` | k6 2.3.0 + `load/shop.js`, build từ [`load/Containerfile`](../../load/Containerfile) |
+| ConfigMap `shop-load` | `BASE_URL`, `PROFILE`, `DURATION`, `VUS` (số người dùng ảo), `BUY_PERCENT` (tỷ lệ người dùng ảo mua hàng), `ORDERS_PER_MIN` (số đơn đặt đều đặn mỗi phút, 0 = tắt), `CARD_PERCENT` (tỷ lệ đơn trả bằng thẻ trong số đó, mặc định 50) |
+| Secret `shop-load` | `ADMIN_PASSWORD` |
 
-Mức tải: sửa `~/.config/shop-load/env` rồi `systemctl --user restart shop-load`.
+Sửa `shop.js` xong thì build lại và chạy lại pod:
+
+```bash
+cd ~/promptdo/webshop-demo/load
+./build-image.sh --import-local                                         # build, nạp vào containerd (cần sudo)
+set -a; . ~/.config/shop-load/env; set +a; ./k8s/deploy.sh "$BASE_URL"  # áp manifest, secret, chạy lại pod
+```
+
+`deploy.sh` đưa ConfigMap về mức nền; muốn mức demo thì chạy lệnh đổi mức dưới đây sau đó. Cụm khác có registry: `./build-image.sh --push <registry>/<project>` rồi `./k8s/deploy.sh <BASE_URL> <registry>/<project>/shop-load:current`; khi đó pod chạy trên node bất kỳ.
+
+Đổi mức tải:
+
+```bash
+# mức demo
+kubectl -n shop-load patch cm shop-load --type merge -p '{"data":{"VUS":"10","BUY_PERCENT":"25","ORDERS_PER_MIN":"10"}}' && kubectl -n shop-load rollout restart deploy/shop-load
+# mức nền
+kubectl -n shop-load patch cm shop-load --type merge -p '{"data":{"VUS":"2","BUY_PERCENT":"2","ORDERS_PER_MIN":"1"}}' && kubectl -n shop-load rollout restart deploy/shop-load
+```
 
 | Mức | Cấu hình | Lưu lượng | Đơn hàng |
 |---|---|---|---|
-| Nền (mặc định) | `VUS=2`, `BUY_PERCENT=2`, `ORDERS_PER_MIN=1` | ~60 request/phút | ~70/giờ (1 đơn/phút đều đặn) |
-| Buổi demo | `VUS=10`, `BUY_PERCENT=25`, `ORDERS_PER_MIN=10` | ~350 request/phút | ~1000/giờ (cổng thanh toán ~8 request/phút) |
+| Nền | `VUS=2`, `BUY_PERCENT=2`, `ORDERS_PER_MIN=1` | ~60 request/phút | ~70/giờ (1 đơn/phút đều đặn) |
+| Buổi demo (đang chạy) | `VUS=10`, `BUY_PERCENT=25`, `ORDERS_PER_MIN=10` | ~350 request/phút | ~1000/giờ (cổng thanh toán ~8 request/phút) |
 
 `ORDERS_PER_MIN` là cách chắc chắn nhất để có đơn hàng: k6 bắt đầu đúng ngần ấy lượt đặt mỗi phút, không phụ thuộc người dùng ảo đang xem hàng. Muốn dồn tải vào đặt hàng (thanh toán, rủi ro, Kafka) thì chỉ tăng số này.
 
-Sau buổi demo nên trả về mức nền; đơn sinh ra sẽ được lịch dọn xóa sau 2 ngày.
+Cách cũ (systemd user service `shop-load` của `cp`, đọc `~/.config/shop-load/env`) vẫn còn nhưng đã dừng và disable. **Không chạy cả hai cùng lúc**, tải sẽ gấp đôi.
 
-`loginctl enable-linger cp` đã được bật để service chạy cả khi `cp` không đăng nhập; tắt bằng `loginctl disable-linger cp`.
+Sau buổi demo nên trả về mức nền; đơn sinh ra sẽ được lịch dọn xóa sau 2 ngày.
 
 Tải giả lập tạo đơn hàng thật trong database (ghi chú `k6`); nhóm quản trị trong kịch bản tự xử lý đơn và nhập thêm hàng cho size đã hết, lịch dọn trên svdb xóa đơn cũ, nên có thể chạy liên tục nhiều tuần.
 
 ## 4. Tắt toàn bộ demo
 
 ```bash
-systemctl --user disable --now shop-load                                 # control-plane
+kubectl -n shop-load scale deploy/shop-load --replicas=0               # control-plane
 ssh root@192.168.50.64 'systemctl disable --now nginx'
 ssh root@192.168.50.65 'systemctl disable --now shop-backend shop-payment shop-risk'
 ssh root@192.168.50.66 'systemctl disable --now kafka postgresql; mv /etc/cron.d/shop-db-backup /etc/cron.d/shop-load-cleanup /root/ 2>/dev/null'
@@ -203,7 +220,7 @@ Bật lại theo thứ tự CSDL → ứng dụng → web → tải:
 ssh root@192.168.50.66 'systemctl enable --now postgresql kafka; mv /root/shop-db-backup /root/shop-load-cleanup /etc/cron.d/ 2>/dev/null'
 ssh root@192.168.50.65 'systemctl enable --now shop-payment shop-risk shop-backend'
 ssh root@192.168.50.64 'systemctl enable --now nginx'
-systemctl --user enable --now shop-load
+kubectl -n shop-load scale deploy/shop-load --replicas=1
 ```
 
 Dữ liệu, cấu hình và firewall không bị đụng tới khi tắt. `docker` vẫn chạy (không có container nào); tắt hẳn: `systemctl disable --now docker docker.socket containerd`.
