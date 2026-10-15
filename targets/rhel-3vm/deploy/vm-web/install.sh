@@ -48,13 +48,6 @@ if command -v getenforce >/dev/null && [[ "$(getenforce)" != "Disabled" ]]; then
     restorecon -R /var/www/shop /var/www/certbot /etc/nginx
 fi
 
-# Backend readiness state used by locations.conf; kept up to date by shop-upstream-check (see below).
-if [[ ! -f /etc/nginx/shop-backend-state.conf ]]; then
-    # shellcheck disable=SC2016  # $shop_backend_ready is an nginx variable, written literally
-    printf '# Managed by shop-upstream-check: 1 = proxy /api/ to the backend, 0 = answer 503.\nset $shop_backend_ready 1;\n' \
-        > /etc/nginx/shop-backend-state.conf
-fi
-
 cat > /usr/local/sbin/shop-render-nginx <<'RENDER'
 #!/usr/bin/env bash
 # Re-renders /etc/nginx/conf.d/shop.conf from /etc/shop/web.env (HTTPS if certificates exist).
@@ -85,11 +78,13 @@ systemctl enable nginx >/dev/null
 /usr/local/sbin/shop-render-nginx
 systemctl restart nginx
 
-log "Backend readiness check every 5 s (shop-upstream-check.timer)"
-install -m 755 "${HERE}/upstream-check.sh" /usr/local/sbin/shop-upstream-check
-install -m 644 "${HERE}/shop-upstream-check.service" "${HERE}/shop-upstream-check.timer" /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable --now shop-upstream-check.timer >/dev/null
+# Earlier releases polled the backend readiness every 5 s from here (shop-upstream-check); removed.
+if [[ -f /etc/systemd/system/shop-upstream-check.timer ]]; then
+    systemctl disable --now shop-upstream-check.timer >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/shop-upstream-check.timer /etc/systemd/system/shop-upstream-check.service \
+        /usr/local/sbin/shop-upstream-check /etc/nginx/shop-backend-state.conf
+    systemctl daemon-reload
+fi
 
 log "Firewall: SSH, HTTP, HTTPS"
 ensure_firewalld

@@ -12,6 +12,5 @@ server {
     server_name ${APP_DOMAIN} localhost _;
 
     root ${WEB_ROOT};
-    include /etc/nginx/shop-backend-state.conf;
     include /etc/nginx/snippets/shop/locations.conf;
 }

@@ -77,18 +77,12 @@ status() { curl -s -H "Authorization: Bearer $TOKEN" http://$WEB/api/admin/simul
 | Cổng thanh toán ngừng hoạt động | `gateway '{"baseLatencyMs":250,"extraLatencyMs":0,"errorRatePercent":0,"declineRatePercent":3,"outage":true}'` | như trên |
 | Lỗi nghiệp vụ trong body: HTTP 200, `responseCode` 99 ở 40% giao dịch thẻ | `sim PAYMENT_BUSINESS_ERROR '{"active":true,"durationMinutes":30,"params":{"code":"99","percent":40}}'` | `sim PAYMENT_BUSINESS_ERROR '{"active":false}'` |
 | Mã HTTP lạ: 423 ở 40% request đặt hàng | `sim ODD_STATUS '{"active":true,"durationMinutes":30,"params":{"code":423,"target":"CHECKOUT","percent":40}}'` | `sim ODD_STATUS '{"active":false}'` |
-| Readiness hỏng (máy web loại backend sau ~10 giây) | `sim READINESS_FAIL '{"active":true,"durationMinutes":10}'` | xem ghi chú bên dưới bảng |
+| Readiness hỏng (endpoint readiness báo DOWN) | `sim READINESS_FAIL '{"active":true,"durationMinutes":10}'` | `sim READINESS_FAIL '{"active":false}'` |
 | Lộ dữ liệu nhạy cảm giả | `sim EMIT_PII '{"active":true,"durationMinutes":30}'` | `sim EMIT_PII '{"active":false}'` |
 | Dịch vụ rủi ro (Python) chậm 2 giây | `sim RISK_SLOW '{"active":true,"durationMinutes":30,"params":{"delayMs":2000}}'` | `sim RISK_SLOW '{"active":false}'` |
 | Dịch vụ rủi ro lỗi 30% | `sim RISK_ERROR '{"active":true,"durationMinutes":30,"params":{"percent":30}}'` | `sim RISK_ERROR '{"active":false}'` |
 | Dịch vụ rủi ro quá thời gian chờ (5 giây > timeout 3 giây) | `sim RISK_TIMEOUT '{"active":true,"durationMinutes":30,"params":{"delayMs":5000}}'` | `sim RISK_TIMEOUT '{"active":false}'` |
 | Nổ cardinality metric (tối đa 5.000 series) | `sim METRIC_CARDINALITY '{"active":true,"durationMinutes":30,"params":{"perRequest":10}}'` | `sim METRIC_CARDINALITY '{"active":false}'` |
-
-Khi `READINESS_FAIL` đang bật, `/api` qua nginx trả 503 nên **không tắt được qua `http://$WEB`**. Tắt bằng cách gọi thẳng backend trên svbe, hoặc chờ hết `durationMinutes`:
-
-```bash
-ssh root@$APP "curl -s -X PUT -H 'Authorization: Bearer $TOKEN' -H 'Content-Type: application/json' -d '{\"active\":false}' http://127.0.0.1:8080/api/admin/simulation/READINESS_FAIL"
-```
 
 Kiểm tra các kịch bản mới:
 
@@ -97,9 +91,8 @@ Kiểm tra các kịch bản mới:
 ssh root@$APP 'KEY=$(grep ^PAYMENT_API_KEY /etc/shop/app.env | cut -d= -f2); curl -s -i -X POST -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" http://127.0.0.1:8090/api/payments/charge -d "{\"orderCode\":\"TEST\",\"amount\":100000,\"card\":{\"number\":\"4111111111111111\",\"holder\":\"T\",\"expiry\":\"12/30\",\"cvv\":\"123\"}}" | grep -E "^HTTP|^X-Response-Code|^\{"'
 # Mã HTTP lạ
 curl -s -i -X POST -H 'Content-Type: application/json' http://$WEB/api/orders -d '{}' | grep -E '^HTTP|^Retry-After|^\{'
-# Readiness: backend DOWN nhưng liveness UP; trạng thái phía nginx
+# Readiness: backend DOWN nhưng liveness UP
 ssh root@$APP 'curl -s http://127.0.0.1:8081/actuator/health/readiness | head -c 80; echo; curl -s http://127.0.0.1:8081/actuator/health/liveness'
-ssh root@$WEB 'cat /etc/nginx/shop-backend-state.conf; journalctl -t shop-upstream-check -n 5 -o cat'
 # Dữ liệu nhạy cảm giả trong log
 ssh root@$APP 'grep payment.card_number /var/log/shop/backend.log | tail -1 | jq -c "{message, \"payment.card_number\"}"'
 # Số series metric
@@ -115,7 +108,7 @@ Xem kịch bản đang bật: `status`. Ý nghĩa từng kịch bản: [../../sc
 ```bash
 ssh root@$DB 'systemctl stop postgresql'
 ```
-- **Hiện tượng:** mọi trang có dữ liệu lỗi 500 sau ~5 giây (chờ lấy kết nối), `/actuator/health/readiness` của backend và payment chuyển `DOWN`; sau ~10 giây bộ kiểm tra trên svfrt loại backend khỏi vòng phục vụ và `/api` trả 503 "đang bảo trì". Tiến trình `postgres` biến mất trên svdb.
+- **Hiện tượng:** mọi trang có dữ liệu lỗi 500 sau ~5 giây (chờ lấy kết nối), `/actuator/health/readiness` của backend và payment chuyển `DOWN`. Tiến trình `postgres` biến mất trên svdb.
 - **Khôi phục:** `ssh root@$DB 'systemctl start postgresql'`. Backend và payment tự kết nối lại, không cần khởi động lại.
 - **Kiểm tra:** `check` (readiness `UP` sau vài giây).
 
@@ -127,7 +120,7 @@ Chặn (DROP) gói tin từ svbe tới cổng 5432, rồi cắt các kết nối
 ssh root@$DB "firewall-cmd --add-rich-rule='rule family=\"ipv4\" source address=\"$APP\" port port=\"5432\" protocol=\"tcp\" drop' --timeout=600 \
   && runuser -u postgres -- psql -qc \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname IN ('shop','payments') AND pid <> pg_backend_pid()\""
 ```
-- **Hiện tượng:** request treo ~5 giây rồi lỗi 500 (`Connection is not available, request timed out`), sau đó readiness DOWN và nginx trả 503; PostgreSQL vẫn chạy bình thường. Đây là kiểu "dịch vụ phụ thuộc không phản hồi" chứ không phải "dịch vụ chết".
+- **Hiện tượng:** request treo ~5 giây rồi lỗi 500 (`Connection is not available, request timed out`), readiness DOWN; PostgreSQL vẫn chạy bình thường. Đây là kiểu "dịch vụ phụ thuộc không phản hồi" chứ không phải "dịch vụ chết".
 - **Khôi phục sớm** (gỡ đúng rule tạm đó):
   ```bash
   ssh root@$DB "firewall-cmd --remove-rich-rule='rule family=\"ipv4\" source address=\"$APP\" port port=\"5432\" protocol=\"tcp\" drop'"
@@ -193,7 +186,7 @@ ssh root@$DB "modprobe sch_netem && nohup sh -c 'tc qdisc add dev $IFACE root ne
 ```bash
 ssh root@$APP 'kill -9 $(pgrep -f shop-backend.jar)'
 ```
-- **Hiện tượng:** vài giây đầu nginx trả 502, sau đó 503 "đang bảo trì" (bộ kiểm tra readiness đã loại backend) cho tới khi Spring Boot khởi động xong (~40-60 giây) và được đưa lại vào vòng phục vụ; systemd ghi "Main process exited, status=9/KILL" rồi tự khởi động lại; tiến trình Java mới có PID khác.
+- **Hiện tượng:** nginx trả 502 khoảng 40-60 giây (thời gian Spring Boot khởi động lại); systemd ghi "Main process exited, status=9/KILL" rồi tự khởi động lại; tiến trình Java mới có PID khác.
 - **Khôi phục:** tự động. **Kiểm tra:** `check`; `ssh root@$APP 'systemctl show shop-backend -p NRestarts'`.
 
 ### 3.2 Dừng backend (sự cố có chủ đích, không tự lên)
@@ -201,7 +194,7 @@ ssh root@$APP 'kill -9 $(pgrep -f shop-backend.jar)'
 ```bash
 ssh root@$APP 'systemctl stop shop-backend'
 ```
-- **Hiện tượng:** `/api` trả 502 vài giây, rồi 503 "đang bảo trì" khi bộ kiểm tra readiness loại backend; trang web vẫn tải được nhưng không có dữ liệu.
+- **Hiện tượng:** toàn bộ `/api` trả 502 từ nginx; trang web vẫn tải được nhưng không có dữ liệu.
 - **Khôi phục:** `ssh root@$APP 'systemctl start shop-backend'` (sẵn sàng sau ~40-60 giây).
 
 ### 3.3 Container cổng thanh toán chết, systemd tự dựng lại
@@ -300,7 +293,7 @@ ssh root@$APP 'cd /root/shop-1.0.0 && ./deploy/vm-app/deploy.sh backend backend/
 ```bash
 ssh root@$APP 'echo "not a jar" > /tmp/broken.jar && cd /root/shop-1.0.0 && WAIT_SECONDS=60 ./deploy/vm-app/deploy.sh backend /tmp/broken.jar'
 ```
-- **Hiện tượng:** ~2 phút `/api` lỗi (502 rồi 503 "đang bảo trì"; 60 giây chờ + khởi động lại bản cũ); log `Error: Invalid or corrupt jarfile`, systemd khởi động lại liên tục; cuối cùng script báo "Rolled back successfully" và "Deployment failed".
+- **Hiện tượng:** ~2 phút 502 (60 giây chờ + khởi động lại bản cũ); log `Error: Invalid or corrupt jarfile`, systemd khởi động lại liên tục; cuối cùng script báo "Rolled back successfully" và "Deployment failed".
 - **Kiểm tra:** `check`; jar đang chạy là bản cũ (`ls -la /opt/shop/backend/`).
 
 Tương tự cho cổng thanh toán (quay về image `:prev`): `WAIT_SECONDS=60 ./deploy/vm-app/deploy.sh payment /tmp/broken.jar`.

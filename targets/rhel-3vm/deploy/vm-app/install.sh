@@ -84,7 +84,6 @@ log "Firewall: 8080 only from ${FRONTEND_HOST}, 8081 from ${ADMIN_SUBNET}; 8090 
 ensure_firewalld
 fw_allow_from "${FRONTEND_HOST}" 8080
 fw_allow_from "${ADMIN_SUBNET}" 8081
-fw_allow_from "${FRONTEND_HOST}" 8081   # readiness checks from the web VM
 fw_apply
 
 log "Application VM prepared. Deploy with: sudo ${HERE}/deploy.sh payment|backend <jar>  /  deploy.sh risk <risk dir>"

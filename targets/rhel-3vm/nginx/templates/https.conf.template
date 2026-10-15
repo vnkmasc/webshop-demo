@@ -36,6 +36,5 @@ server {
     add_header Strict-Transport-Security "max-age=31536000" always;
 
     root ${WEB_ROOT};
-    include /etc/nginx/shop-backend-state.conf;
     include /etc/nginx/snippets/shop/locations.conf;
 }

@@ -63,7 +63,7 @@ Kịch bản dễ thấy nhất; làm được bài này là dùng được mọ
 | 5 | Dịch vụ rủi ro chậm / quá thời gian chờ | Trace xuyên Java → Python; thời gian chờ nằm ở dịch vụ Python; tắt dịch vụ Python khách vẫn mua được |
 | 6 | Lộ dữ liệu nhạy cảm (giả) | Thấy số thẻ test trong trace/log → cấu hình che → biến mất |
 | 7 | Mã HTTP lạ (423/451...) | Lọc, cảnh báo theo mã trạng thái HTTP |
-| 8 | Readiness hỏng | Sự kiện mất khả năng phục vụ rồi tự phục hồi (web trả 503 "đang bảo trì") |
+| 8 | Readiness hỏng | Endpoint readiness báo DOWN trong khi tiến trình vẫn sống (liveness UP); cần công cụ giám sát theo dõi endpoint này (ví dụ synthetic/HTTP monitor tới cổng 8081) |
 | 9 | CPU cao, Rò bộ nhớ, Nổ cardinality metric | Profiling chỉ đúng hàm; heap; số series metric |
 | 10 | Lỗi JavaScript | Phải **tự mở trình duyệt** (tải giả lập không chạy JavaScript): lỗi phía người dùng |
 | 11 | Bài tập hạ tầng | Theo [fault-drills.md](targets/rhel-3vm/fault-drills.md). Bài firewall/mạng: chuẩn bị sẵn console VM trên hypervisor |

@@ -42,4 +42,4 @@ Yêu cầu chung của ứng dụng khi demo: `APP_SEED_ENABLED=true` (dữ li�
 
 | Target | Mô tả | Trạng thái |
 |---|---|---|
-| [`rhel-3vm`](targets/rhel-3vm/README.md) | 3 máy RHEL 9.x; backend Java chạy bằng systemd, cổng thanh toán (Java) và chấm điểm rủi ro (Python) chạy bằng Docker CE, PostgreSQL 16 từ AppStream, nginx kèm kiểm tra readiness | Đang dùng (svfrt / svbe / svdb) |
+| [`rhel-3vm`](targets/rhel-3vm/README.md) | 3 máy RHEL 9.x; backend Java chạy bằng systemd, cổng thanh toán (Java) và chấm điểm rủi ro (Python) chạy bằng Docker CE, PostgreSQL 16 từ AppStream, nginx | Đang dùng (svfrt / svbe / svdb) |
