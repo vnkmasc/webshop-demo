@@ -1,7 +1,0 @@
-# Load generator image: the k6 runtime plus the shop load profile.
-#   ./build-image.sh                       # build locally
-#   ./build-image.sh --push registry/proj  # build and push
-FROM docker.io/grafana/k6:2.3.0
-COPY shop.js /scripts/shop.js
-ENV PROFILE=steady VUS=2 DURATION=8760h BUY_PERCENT=2 ORDERS_PER_MIN=1
-ENTRYPOINT ["k6", "run", "--quiet", "/scripts/shop.js"]

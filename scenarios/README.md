@@ -31,12 +31,7 @@ Tải nền chạy liên tục nên để nhẹ (`VUS=2 BUY_PERCENT=2 ORDERS_PER
 
 Mọi đơn do kịch bản tạo có ghi chú `k6` để phân biệt và dọn (target `rhel-3vm`: lịch `shop-load-cleanup` trên máy CSDL).
 
-Chỉ số riêng: `orders_placed`, `orders_payment_failed`, `checkout_duration`. Tải nền liên tục, chọn một trong ba cách:
-- **Kubernetes**: image build từ `load/Containerfile` (`load/build-image.sh`), triển khai bằng `load/k8s/deploy.sh` (manifest `load/k8s/shop-load.yaml`). Mức tải nằm trong ConfigMap `shop-load`.
-- `load/shop-load.service`: systemd hệ thống.
-- `load/shop-load.user.service`: systemd của một user, không cần root.
-
-Hướng dẫn nằm trong từng file.
+Chỉ số riêng: `orders_placed`, `orders_payment_failed`, `checkout_duration`. Tải nền liên tục: `load/shop-load.service` (systemd hệ thống) hoặc `load/shop-load.user.service` (systemd của một user, không cần root); hướng dẫn trong từng file.
 
 ## 2. Mô phỏng sự cố
 
@@ -107,7 +102,7 @@ systemctl stop shop-backend        # máy ứng dụng: nginx trả 502
 
 Một kịch bản chỉ gây hậu quả khi **có request đi qua**. Bật sự cố lúc không có tải (hoặc tải chỉ bắt đầu sau khi kịch bản đã hết hạn) thì không có gì để phát hiện.
 
-- **Luôn chạy tải nền trước**, rồi mới bật kịch bản. Kiểm tra: `kubectl -n shop-load get pods` (target `rhel-3vm`) hoặc `systemctl --user is-active shop-load` nếu chạy bằng systemd.
+- **Luôn chạy tải nền trước**, rồi mới bật kịch bản. Kiểm tra: `systemctl --user is-active shop-load` trên máy chạy tải.
 - **Đặt thời lượng kịch bản đủ dài**, 20-30 phút. Các cơ chế phát hiện bất thường cần sự cố kéo dài nhiều phút liên tục, không tính đột biến ngắn.
 - **Dịch vụ mới cần thời gian học mức bình thường.** Cảnh báo dựa trên baseline tự học (tỷ lệ lỗi, tải tăng/giảm) cần dữ liệu từ khoảng hơn một ngày đến một tuần. Mỗi lần đổi cách chạy một dịch vụ (ví dụ chuyển sang container), hệ thống giám sát có thể coi đó là dịch vụ mới và học lại từ đầu, nên hạn chế thay đổi hạ tầng sát ngày demo.
 - **Cảnh báo theo ngưỡng cố định hoạt động ngay**, không cần học: CPU host bão hòa, hết bộ nhớ, tiến trình hoặc dịch vụ ngừng hoạt động. Để có cảnh báo ngay trong ngày đầu, ưu tiên các kịch bản: `HIGH_CPU` với `cpuMs` 4000-5000 (đẩy CPU máy ứng dụng lên gần 100%), dừng hẳn `shop-payment` hoặc `shop-backend`, hoặc đặt ngưỡng thời gian phản hồi / tỷ lệ lỗi cố định cho dịch vụ trong cấu hình phát hiện bất thường.
