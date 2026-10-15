@@ -17,7 +17,6 @@ webshop-demo/
 │       ├── build-release.sh  Build từ repo webshop + đóng gói kèm script triển khai
 │       ├── deploy/         Script cài đặt và triển khai cho từng máy
 │       └── nginx/          Cấu hình nginx
-├── load/                 Tải giả lập k6 (người xem hàng, người mua, khách quen, quản trị)
 ├── scenarios/            Kịch bản sự cố và gợi ý buổi demo
 └── smoke/                Smoke test đầu-cuối (~60 bước)
 ```
@@ -34,7 +33,7 @@ cd webshop-demo/targets/rhel-3vm
 
 ## Thêm target mới
 
-Một target là một thư mục trong `targets/` gồm cách build/đóng gói từ repo `webshop`, script triển khai và tài liệu vận hành (`README.md`, `operations.md`). `load/`, `scenarios/` và `smoke/` dùng chung cho mọi target vì chỉ cần URL của cửa hàng.
+Một target là một thư mục trong `targets/` gồm cách build/đóng gói từ repo `webshop`, script triển khai và tài liệu vận hành (`README.md`, `operations.md`). `scenarios/` và `smoke/` dùng chung cho mọi target vì chỉ cần URL của cửa hàng; tải giả lập cũng vậy, nằm ở `loadgen/` của repo `webshop`.
 
 Yêu cầu chung của ứng dụng khi demo: `APP_SEED_ENABLED=true` (dữ liệu và tài khoản mẫu) và `APP_SIMULATION_ENABLED=true` (API mô phỏng sự cố). Danh sách biến môi trường đầy đủ: README của repo `webshop`.
 

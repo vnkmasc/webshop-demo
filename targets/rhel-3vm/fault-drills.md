@@ -32,9 +32,9 @@ check
 Tải nền phải đang chạy, nếu không sự cố không ảnh hưởng tới ai (xem [../../scenarios/README.md](../../scenarios/README.md#4-điều-kiện-để-công-cụ-giám-sát-mở-cảnh-báo)). Khi tập, nên tăng lên mức demo rồi trả lại sau:
 
 ```bash
-kubectl -n shop-load patch cm shop-load --type merge -p '{"data":{"VUS":"10","BUY_PERCENT":"25","ORDERS_PER_MIN":"10"}}' && kubectl -n shop-load rollout restart deploy/shop-load
+kubectl -n shop-loadgen patch cm shop-loadgen --type merge -p '{"data":{"VUS":"5","BUY_PERCENT":"25","ORDERS_PER_MIN":"5"}}' && kubectl -n shop-loadgen rollout restart deploy/shop-loadgen
 # sau buổi tập:
-kubectl -n shop-load patch cm shop-load --type merge -p '{"data":{"VUS":"2","BUY_PERCENT":"2","ORDERS_PER_MIN":"1"}}' && kubectl -n shop-load rollout restart deploy/shop-load
+kubectl -n shop-loadgen patch cm shop-loadgen --type merge -p '{"data":{"VUS":"1","BUY_PERCENT":"2","ORDERS_PER_MIN":"1"}}' && kubectl -n shop-loadgen rollout restart deploy/shop-loadgen
 ```
 
 Một số bài về mạng cần module `sch_netem` (giả lập trễ/mất gói), không có sẵn trên RHEL minimal. Cài một lần trên máy cần dùng (đã cài sẵn trên svdb):
@@ -340,6 +340,6 @@ ssh root@$APP "firewall-cmd --remove-rich-rule='rule family=\"ipv4\" source addr
 ssh root@$WEB 'systemctl start nginx'
 
 # Tải về mức nền
-kubectl -n shop-load patch cm shop-load --type merge -p '{"data":{"VUS":"2","BUY_PERCENT":"2","ORDERS_PER_MIN":"1"}}' && kubectl -n shop-load rollout restart deploy/shop-load
+kubectl -n shop-loadgen patch cm shop-loadgen --type merge -p '{"data":{"VUS":"1","BUY_PERCENT":"2","ORDERS_PER_MIN":"1"}}' && kubectl -n shop-loadgen rollout restart deploy/shop-loadgen
 check
 ```
