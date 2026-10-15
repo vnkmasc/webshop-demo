@@ -170,15 +170,17 @@ journalctl --user -u shop-load -f
 | File | Nội dung |
 |---|---|
 | `~/.config/systemd/user/shop-load.service` | Unit chạy `k6 run <repo webshop-demo>/load/shop.js` (bản sao của `load/shop-load.user.service`) |
-| `~/.config/shop-load/env` | `BASE_URL`, `PROFILE`, `VUS` (số người dùng ảo), `BUY_PERCENT` (tỷ lệ lượt mua hàng), `DURATION`, `ADMIN_PASSWORD` (chmod 600) |
+| `~/.config/shop-load/env` | `BASE_URL`, `PROFILE`, `VUS` (số người dùng ảo), `BUY_PERCENT` (tỷ lệ người dùng ảo mua hàng), `ORDERS_PER_MIN` (số đơn đặt đều đặn mỗi phút, 0 = tắt), `CARD_PERCENT` (tỷ lệ đơn trả bằng thẻ trong số đó, mặc định 50), `DURATION`, `ADMIN_PASSWORD` (chmod 600) |
 | `~/.local/bin/k6` | k6 (bản tải từ GitHub releases) |
 
 Mức tải: sửa `~/.config/shop-load/env` rồi `systemctl --user restart shop-load`.
 
 | Mức | Cấu hình | Lưu lượng | Đơn hàng |
 |---|---|---|---|
-| Nền (mặc định) | `VUS=2`, `BUY_PERCENT=2` | ~55 request/phút | ~10/giờ |
-| Buổi demo | `VUS=10`, `BUY_PERCENT=25` | ~300 request/phút | ~440/giờ |
+| Nền (mặc định) | `VUS=2`, `BUY_PERCENT=2`, `ORDERS_PER_MIN=1` | ~60 request/phút | ~70/giờ (1 đơn/phút đều đặn) |
+| Buổi demo | `VUS=10`, `BUY_PERCENT=25`, `ORDERS_PER_MIN=10` | ~350 request/phút | ~1000/giờ (cổng thanh toán ~8 request/phút) |
+
+`ORDERS_PER_MIN` là cách chắc chắn nhất để có đơn hàng: k6 bắt đầu đúng ngần ấy lượt đặt mỗi phút, không phụ thuộc người dùng ảo đang xem hàng. Muốn dồn tải vào đặt hàng (thanh toán, rủi ro, Kafka) thì chỉ tăng số này.
 
 Sau buổi demo nên trả về mức nền; đơn sinh ra sẽ được lịch dọn xóa sau 2 ngày.
 

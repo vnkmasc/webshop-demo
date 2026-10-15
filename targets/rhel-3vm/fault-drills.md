@@ -32,9 +32,9 @@ check
 Tải nền phải đang chạy, nếu không sự cố không ảnh hưởng tới ai (xem [../../scenarios/README.md](../../scenarios/README.md#4-điều-kiện-để-công-cụ-giám-sát-mở-cảnh-báo)). Khi tập, nên tăng lên mức demo rồi trả lại sau:
 
 ```bash
-sed -i 's/^VUS=.*/VUS=10/; s/^BUY_PERCENT=.*/BUY_PERCENT=25/' ~/.config/shop-load/env && systemctl --user restart shop-load
+sed -i 's/^VUS=.*/VUS=10/; s/^BUY_PERCENT=.*/BUY_PERCENT=25/; s/^ORDERS_PER_MIN=.*/ORDERS_PER_MIN=10/' ~/.config/shop-load/env && systemctl --user restart shop-load
 # sau buổi tập:
-sed -i 's/^VUS=.*/VUS=2/; s/^BUY_PERCENT=.*/BUY_PERCENT=2/' ~/.config/shop-load/env && systemctl --user restart shop-load
+sed -i 's/^VUS=.*/VUS=2/; s/^BUY_PERCENT=.*/BUY_PERCENT=2/; s/^ORDERS_PER_MIN=.*/ORDERS_PER_MIN=1/' ~/.config/shop-load/env && systemctl --user restart shop-load
 ```
 
 Một số bài về mạng cần module `sch_netem` (giả lập trễ/mất gói), không có sẵn trên RHEL minimal. Cài một lần trên máy cần dùng (đã cài sẵn trên svdb):
@@ -340,6 +340,6 @@ ssh root@$APP "firewall-cmd --remove-rich-rule='rule family=\"ipv4\" source addr
 ssh root@$WEB 'systemctl start nginx'
 
 # Tải về mức nền
-sed -i 's/^VUS=.*/VUS=2/; s/^BUY_PERCENT=.*/BUY_PERCENT=2/' ~/.config/shop-load/env && systemctl --user restart shop-load
+sed -i 's/^VUS=.*/VUS=2/; s/^BUY_PERCENT=.*/BUY_PERCENT=2/; s/^ORDERS_PER_MIN=.*/ORDERS_PER_MIN=1/' ~/.config/shop-load/env && systemctl --user restart shop-load
 check
 ```

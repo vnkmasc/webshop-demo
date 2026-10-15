@@ -23,7 +23,11 @@ ADMIN_PASSWORD='<APP_ADMIN_PASSWORD>' ./run.sh http://shop.example.com spike 10 
 | Tra cứu | 5% | Tra cứu đơn bằng mã và số điện thoại |
 | Quản trị | 5% | Tổng quan → xác nhận / giao / hoàn tất đơn → nhập thêm hàng cho size đã hết |
 
-Tỷ lệ mỗi nhóm đổi được bằng biến môi trường: `BUY_PERCENT` (mặc định 25), `CUSTOMER_PERCENT` (10), `TRACK_PERCENT` (5), `ADMIN_PERCENT` (5); phần còn lại là xem hàng. Tải nền chạy liên tục nên để nhẹ (`VUS=2 BUY_PERCENT=2`, ~55 request/phút, ~10 đơn/giờ); chỉ tăng lên khi demo.
+Tỷ lệ mỗi nhóm đổi được bằng biến môi trường: `BUY_PERCENT` (mặc định 25), `CUSTOMER_PERCENT` (10), `TRACK_PERCENT` (5), `ADMIN_PERCENT` (5); phần còn lại là xem hàng.
+
+Các nhóm trên chủ yếu xem và tìm sản phẩm: đặt hàng chỉ chiếm vài phần trăm số request. Vì vậy có thêm luồng **đặt hàng đều đặn** chạy song song: `ORDERS_PER_MIN` lượt mỗi phút (mặc định 6, 0 = tắt), mỗi lượt: xem sản phẩm → báo giá giỏ → đặt hàng (`CARD_PERCENT`, mặc định 50% trả bằng thẻ; 30% đặt khi đã đăng nhập `loadNN`) → tra cứu lại đơn vừa đặt. Đây là luồng giữ cho thanh toán, chấm điểm rủi ro và hàng đợi Kafka luôn có việc.
+
+Tải nền chạy liên tục nên để nhẹ (`VUS=2 BUY_PERCENT=2 ORDERS_PER_MIN=1`, ~60 request/phút, ~70 đơn/giờ); khi demo tăng lên `VUS=10 BUY_PERCENT=25 ORDERS_PER_MIN=10`.
 
 Mọi đơn do kịch bản tạo có ghi chú `k6` để phân biệt và dọn (target `rhel-3vm`: lịch `shop-load-cleanup` trên máy CSDL).
 
@@ -102,7 +106,7 @@ Một kịch bản chỉ gây hậu quả khi **có request đi qua**. Bật s�
 - **Đặt thời lượng kịch bản đủ dài**, 20-30 phút. Các cơ chế phát hiện bất thường cần sự cố kéo dài nhiều phút liên tục, không tính đột biến ngắn.
 - **Dịch vụ mới cần thời gian học mức bình thường.** Cảnh báo dựa trên baseline tự học (tỷ lệ lỗi, tải tăng/giảm) cần dữ liệu từ khoảng hơn một ngày đến một tuần. Mỗi lần đổi cách chạy một dịch vụ (ví dụ chuyển sang container), hệ thống giám sát có thể coi đó là dịch vụ mới và học lại từ đầu, nên hạn chế thay đổi hạ tầng sát ngày demo.
 - **Cảnh báo theo ngưỡng cố định hoạt động ngay**, không cần học: CPU host bão hòa, hết bộ nhớ, tiến trình hoặc dịch vụ ngừng hoạt động. Để có cảnh báo ngay trong ngày đầu, ưu tiên các kịch bản: `HIGH_CPU` với `cpuMs` 4000-5000 (đẩy CPU máy ứng dụng lên gần 100%), dừng hẳn `shop-payment` hoặc `shop-backend`, hoặc đặt ngưỡng thời gian phản hồi / tỷ lệ lỗi cố định cho dịch vụ trong cấu hình phát hiện bất thường.
-- Dịch vụ có ít request (dưới khoảng 10 request/phút) có thể bị bỏ qua để tránh báo nhiễu. Ở mức tải nền, backend nhận ~55 request/phút nhưng cổng thanh toán gần như không có request; trước khi demo sự cố thanh toán, chuyển sang mức demo (`VUS=10 BUY_PERCENT=25`, cổng thanh toán ~3-4 request/phút) hoặc cao hơn.
+- Dịch vụ có ít request (dưới khoảng 10 request/phút) có thể bị bỏ qua để tránh báo nhiễu. Ở mức tải nền, backend nhận ~55 request/phút nhưng cổng thanh toán gần như không có request; trước khi demo sự cố thanh toán, chuyển sang mức demo (`VUS=10 BUY_PERCENT=25 ORDERS_PER_MIN=10`, cổng thanh toán ~8 request/phút) hoặc tăng riêng `ORDERS_PER_MIN`.
 
 ## 5. Gợi ý một buổi demo
 

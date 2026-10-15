@@ -40,7 +40,7 @@ Kịch bản dễ thấy nhất; làm được bài này là dùng được mọ
 
 1. **Tăng tải lên mức demo** (trên control-plane, user `cp`):
    ```bash
-   sed -i 's/^VUS=.*/VUS=10/; s/^BUY_PERCENT=.*/BUY_PERCENT=25/' ~/.config/shop-load/env && systemctl --user restart shop-load
+   sed -i 's/^VUS=.*/VUS=10/; s/^BUY_PERCENT=.*/BUY_PERCENT=25/; s/^ORDERS_PER_MIN=.*/ORDERS_PER_MIN=10/' ~/.config/shop-load/env && systemctl --user restart shop-load
    ```
 2. Đợi ~10 phút, ghi lại thời gian phản hồi bình thường của `shop-backend` trên công cụ giám sát.
 3. **Quản trị → Mô phỏng sự cố**, bật thẻ **SQL chậm** (3000 ms, 30 phút).
@@ -51,7 +51,7 @@ Kịch bản dễ thấy nhất; làm được bài này là dùng được mọ
    - danh sách cảnh báo/problem: có thể có hoặc chưa (xem mục 4 của [scenarios/README.md](scenarios/README.md)).
 5. **Tắt** kịch bản, **trả tải** về mức nền:
    ```bash
-   sed -i 's/^VUS=.*/VUS=2/; s/^BUY_PERCENT=.*/BUY_PERCENT=2/' ~/.config/shop-load/env && systemctl --user restart shop-load
+   sed -i 's/^VUS=.*/VUS=2/; s/^BUY_PERCENT=.*/BUY_PERCENT=2/; s/^ORDERS_PER_MIN=.*/ORDERS_PER_MIN=1/' ~/.config/shop-load/env && systemctl --user restart shop-load
    ```
 
 ## 4. Test gì tiếp: mỗi lần một kịch bản

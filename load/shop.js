@@ -6,6 +6,9 @@
 //   tracker   TRACK_PERCENT=5     guest order lookup
 //   admin     ADMIN_PERCENT=5     dashboard -> confirm / ship / deliver orders -> restock sizes that ran out
 //   browser   the rest            home -> category / search with filters -> product pages
+// On top of that, the "orders" scenario places ORDERS_PER_MIN orders per minute at a fixed rate, whatever the
+// mix above does: product -> quote -> order (CARD_PERCENT paid by card, some by a logged-in customer)
+// -> order status lookup. This is what keeps checkout, payment, risk and the order queue busy. 0 turns it off.
 // Every order this script places has the note "k6", so generated data can be told apart and cleaned up.
 import http from 'k6/http';
 import { check, group, sleep } from 'k6';
@@ -18,6 +21,8 @@ const VUS = Number(__ENV.VUS || 10);
 const DURATION = __ENV.DURATION || '30m';
 const ADMIN_EMAIL = __ENV.ADMIN_EMAIL || 'admin@saibuoc.vn';
 const ADMIN_PASSWORD = __ENV.ADMIN_PASSWORD || 'SaiBuoc@2026';
+const ORDERS_PER_MIN = Math.max(0, Number(__ENV.ORDERS_PER_MIN ?? 6));
+const CARD_SHARE = Math.max(0, Number(__ENV.CARD_PERCENT ?? 50)) / 100;
 
 const ordersPlaced = new Counter('orders_placed');
 const ordersFailed = new Counter('orders_payment_failed');
@@ -33,8 +38,17 @@ const profiles = {
   },
 };
 
+const scenarios = { shop: profiles[PROFILE] || profiles.smoke };
+if (ORDERS_PER_MIN > 0) {
+  scenarios.orders = {
+    executor: 'constant-arrival-rate', exec: 'order', rate: ORDERS_PER_MIN, timeUnit: '1m',
+    duration: PROFILE === 'steady' ? DURATION : PROFILE === 'spike' ? '10m' : '1m',
+    preAllocatedVUs: Math.max(2, Math.ceil(ORDERS_PER_MIN / 4)), maxVUs: Math.max(10, ORDERS_PER_MIN * 2),
+  };
+}
+
 export const options = {
-  scenarios: { shop: profiles[PROFILE] || profiles.smoke },
+  scenarios,
   thresholds: {
     'http_req_failed{kind:read}': ['rate<0.05'],
     'http_req_duration{kind:read}': ['p(95)<1500'],
@@ -96,23 +110,70 @@ function buy() {
     check(quote, { 'quote ok': (r) => r.status === 200 });
     think(3, 8); // filling in the shipping form
     if (Math.random() < 0.3) return; // abandoned checkout
-    const card = Math.random() < 0.45;
+    placeOrder(items, quote.json('data.couponApplied') ? coupon : undefined, Math.random() < 0.45);
+  });
+}
+
+// Places one order; returns { code, phone } when it went through.
+function placeOrder(items, couponCode, card, token) {
+  const n = String(1 + Math.floor(Math.random() * 20)).padStart(2, '0');
+  const phone = `09000000${n}`;
+  const body = {
+    items,
+    couponCode,
+    customer: { name: `Khách tải ${n}`, phone, address: `${n} Lê Lợi`, province: pick(PROVINCES), note: 'k6' },
+    paymentMethod: card ? 'CARD' : 'COD',
+    card: card ? { number: pick(CARDS), holder: 'KHACH TAI', expiry: '12/30', cvv: '123' } : undefined,
+  };
+  const headers = token ? { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } : json.headers;
+  const res = http.post(`${API}/orders`, JSON.stringify(body), { headers, tags: { kind: 'write', name: '/orders' }, timeout: '30s' });
+  checkoutDuration.add(res.timings.duration);
+  if (res.status === 200) {
+    ordersPlaced.add(1);
+  } else if (res.status === 422 || res.status === 502) {
+    ordersFailed.add(1); // declined card or gateway trouble: a business outcome, not a test failure
+  }
+  check(res, { 'order placed or payment refused': (r) => [200, 409, 422, 502].includes(r.status) });
+  return res.status === 200 ? { code: res.json('data.code'), phone } : null;
+}
+
+// Product slugs for the orders scenario, collected once from every category.
+export function setup() {
+  const slugs = [];
+  for (const c of CATEGORIES) {
+    const res = http.get(`${API}/products?category=${c}&sort=bestseller`, { tags: { kind: 'read', name: '/products' } });
+    for (const p of (res.status === 200 && res.json('data.content')) || []) if (p.inStock) slugs.push(p.slug);
+  }
+  return { slugs };
+}
+
+// "orders" scenario: one straight purchase, then the buyer checks the order like real customers do.
+export function order(data) {
+  const slugs = data.slugs || [];
+  if (!slugs.length) return;
+  let token;
+  if (Math.random() < 0.3) {
     const n = String(1 + Math.floor(Math.random() * 20)).padStart(2, '0');
-    const body = {
-      items,
-      couponCode: quote.json('data.couponApplied') ? coupon : undefined,
-      customer: { name: `Khách tải ${n}`, phone: `09000000${n}`, address: `${n} Lê Lợi`, province: pick(PROVINCES), note: 'k6' },
-      paymentMethod: card ? 'CARD' : 'COD',
-      card: card ? { number: pick(CARDS), holder: 'KHACH TAI', expiry: '12/30', cvv: '123' } : undefined,
-    };
-    const res = http.post(`${API}/orders`, JSON.stringify(body), { ...json, tags: { kind: 'write', name: '/orders' }, timeout: '30s' });
-    checkoutDuration.add(res.timings.duration);
-    if (res.status === 200) {
-      ordersPlaced.add(1);
-    } else if (res.status === 422 || res.status === 502) {
-      ordersFailed.add(1); // declined card or gateway trouble: a business outcome, not a test failure
+    const login = http.post(`${API}/auth/login`, JSON.stringify({ email: `load${n}@saibuoc.vn`, password: __ENV.CUSTOMER_PASSWORD || 'SaiBuoc@2026' }), { ...json, tags: { kind: 'read', name: '/auth/login' } });
+    if (login.status === 200) token = login.json('data.accessToken');
+  }
+  group('order', () => {
+    const detail = get(`${API}/products/${pick(slugs)}`, { tags: { kind: 'read', name: '/products/{slug}' } });
+    const variants = (detail.json('data.variants') || []).filter((v) => v.stock > 0);
+    if (!variants.length) return;
+    const items = [{ variantId: pick(variants).id, quantity: Math.random() < 0.85 ? 1 : 2 }];
+    const coupon = Math.random() < 0.3 ? pick(['CHAOBAN', 'GIAM200K', 'FREESHIP', 'HE2025']) : undefined;
+    const quote = http.post(`${API}/cart/quote`, JSON.stringify({ items, couponCode: coupon }), { ...json, tags: { kind: 'read', name: '/cart/quote' } });
+    check(quote, { 'quote ok': (r) => r.status === 200 });
+    think(1, 3);
+    const placed = placeOrder(items, quote.json('data.couponApplied') ? coupon : undefined, Math.random() < CARD_SHARE, token);
+    if (!placed) return;
+    think(1, 3);
+    if (token) {
+      get(`${API}/account/orders/${placed.code}`, { ...auth(token), tags: { kind: 'read', name: '/account/orders/{code}' } });
+    } else {
+      get(`${API}/orders/lookup?code=${placed.code}&phone=${placed.phone}`, { tags: { kind: 'lookup', name: '/orders/lookup' } });
     }
-    check(res, { 'order placed or payment refused': (r) => [200, 409, 422, 502].includes(r.status) });
   });
 }
 
