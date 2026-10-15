@@ -22,11 +22,13 @@ cd /root && tar xzf shop-1.0.0.tar.gz && cd shop-1.0.0
 
 ```bash
 mkdir -p /etc/shop && cp deploy/vm-db/db.env.example /etc/shop/db.env && chmod 600 /etc/shop/db.env
-vi /etc/shop/db.env            # BACKEND_HOST, hai mật khẩu database
+vi /etc/shop/db.env            # BACKEND_HOST, hai mật khẩu database, KAFKA_ADVERTISED_HOST (IP máy này)
 ./deploy/vm-db/install.sh
 ```
 
 Script cài PostgreSQL 16, tạo database `shop` và `payments` cùng user riêng, bật `pg_stat_statements`, ghi log câu lệnh chậm hơn 1 giây, chỉ cho máy ứng dụng kết nối (pg_hba + firewalld), đặt lịch backup 02:30 hằng ngày (`/var/lib/pgsql/backups/shop`, giữ 7 bản).
+
+Với `KAFKA_ENABLED=true`, `install.sh` gọi tiếp `deploy/vm-db/kafka.sh`: cài Java 21, tải Apache Kafka 4.3.1 từ `downloads.apache.org` (kiểm tra SHA-512; máy không ra Internet được thì đặt `KAFKA_TGZ=/đường/dẫn/kafka_2.13-4.3.1.tgz`), chạy một node KRaft (không ZooKeeper) bằng service `kafka`, heap 512 MB, chỉ mở cổng 9092 cho máy ứng dụng. Chỉ cài/sửa Kafka mà không đụng PostgreSQL: `./deploy/vm-db/kafka.sh`.
 
 ## 3. Máy ứng dụng
 
@@ -60,6 +62,26 @@ Hai kiểu chạy trên cùng máy:
 | `shop-payment` | Container Docker, systemd chạy `docker run` | `deploy.sh payment` build image `shop-payment:<thời gian>` từ `payment/Containerfile` (nền `registry.access.redhat.com/ubi9/openjdk-21-runtime`), gắn tag `:current`, giữ bản trước ở `:prev` để quay lại. Chỉ publish `127.0.0.1:8090`. Log JSON `/var/log/shop-payment/payment.log` |
 
 `install.sh` cài Docker CE từ repo chính thức `download.docker.com` (gói `containerd.io` thay gói `runc` của RHEL), tải image nền, sinh `/etc/shop/payment.env` từ `app.env` (lệnh `shop-payment-env`) và cài unit `shop-payment.service`. Nếu máy đang chạy cách cũ (service Java hoặc unit Podman/Quadlet), script tự gỡ. Máy ứng dụng cần ra được Internet tới `download.docker.com` và `registry.access.redhat.com`.
+
+Hàng đợi đơn hàng: đặt `APP_KAFKA_BOOTSTRAP=10.0.0.13:9092` trong `app.env` (để trống thì không dùng hàng đợi). Backend tự tạo topic `orders` khi khởi động.
+
+### Hàng đợi Kafka và công cụ giám sát
+
+Trace bất đồng bộ (đặt hàng → bản ghi Kafka → consumer kho) do agent Java gắn sẵn vào header bản ghi, không cần sửa code. Kiểm tra header trên máy CSDL:
+
+```bash
+runuser -u kafka -- /opt/kafka/current/bin/kafka-console-consumer.sh --bootstrap-server 127.0.0.1:9092 --topic orders \
+  --from-beginning --max-messages 3 --formatter-property print.headers=true --formatter-property print.value=false --timeout-ms 10000 \
+  | grep -a -o 'traceparent:[^,]*'
+```
+
+Ra được dòng `traceparent:00-...` là trace sẽ nối được (một số agent gắn thêm header riêng dạng nhị phân).
+
+| Công cụ | Cần làm |
+|---|---|
+| Dynatrace | Trace producer/consumer: tự có (đã thấy `traceparent`, `X-dynaTrace` trên bản ghi). Metric broker, topic, consumer group: kích hoạt extension **Apache Kafka** từ Hub cho host CSDL |
+| Instana | Agent trên host CSDL tự nhận broker Kafka (sensor Kafka); trace producer/consumer tự có từ agent Java trên máy ứng dụng |
+| Công cụ khác / chung | Lag và số consumer có sẵn ở `/actuator/prometheus` cổng 8081: `shop_events_lag`, `shop_events_consumers` (đo từ broker, vẫn đúng khi consumer chết) |
 
 ### Dịch vụ chấm điểm rủi ro (Python)
 
@@ -113,4 +135,5 @@ Quay lại bản trước: `deploy.sh backend /opt/shop/backend/shop-backend.jar
 | 502 trên web | Từ máy web: `curl http://10.0.0.12:8080/api/site-config` phải trả 200; `getsebool httpd_can_network_connect` phải là `on` |
 | Backend không lên | `journalctl -u shop-backend -n 200`; kết nối DB, `firewall-cmd --list-rich-rules` trên máy CSDL |
 | Thanh toán thẻ luôn lỗi | `systemctl status shop-payment`; `PAYMENT_API_KEY` giống nhau; trang **Cổng thanh toán** có đang bật lỗi/ngừng hoạt động |
+| Đơn kẹt "Chờ kho nhận" | Kịch bản `KAFKA_*` còn bật? `systemctl status kafka` trên máy CSDL; `kafka-consumer-groups.sh --describe --group shop-warehouse` (xem [operations.md](operations.md#kafka-svdb)) |
 | Truy vấn chậm | Máy CSDL: `/var/lib/pgsql/data/log/`; `SELECT * FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 10` |

@@ -50,6 +50,8 @@ Bật `APP_SIMULATION_ENABLED=true`. Vào **Quản trị → Mô phỏng sự c�
 | `RISK_SLOW` | Dịch vụ chấm điểm rủi ro (Python) trả lời chậm thêm `delayMs` (2000) | Thời gian đặt hàng tăng; trên trace, thời gian chờ nằm ở **dịch vụ Python**, không phải backend Java |
 | `RISK_ERROR` | `percent` (30) lời gọi chấm điểm trả 500 | Lỗi ở dịch vụ Python; backend ghi WARN "Risk service failed", **đơn vẫn đặt được** (không có điểm) |
 | `RISK_TIMEOUT` | Dịch vụ chấm điểm trả lời sau `delayMs` (5000), quá timeout 3 giây của backend | Đặt hàng chậm thêm ~3 giây, call sang dịch vụ Python bị cắt; đơn vẫn đặt được |
+| `KAFKA_SLOW_CONSUMER` | Kho (consumer group `shop-warehouse`) xử lý mỗi đơn từ topic `orders` chậm thêm `delayMs` (15000 trên giao diện, tối đa 20000) | Lag của group tăng khi đơn đến nhanh hơn tốc độ xử lý (cần tải mức demo, ~7 đơn/phút), rồi rút về 0 khi tắt; trace consumer dài ra; đơn kẹt "Chờ kho nhận" lâu hơn, lịch sử đơn ghi số giây đã chờ. Khách đặt hàng **không chậm** |
+| `KAFKA_CONSUMER_DEAD` | Consumer kho ngừng hẳn (rời group) trong khi backend vẫn gửi sự kiện | Số thành viên consumer group về 0, lag tăng đều; mọi đơn mới kẹt "Chờ kho nhận". Tắt (hoặc hết giờ) thì consumer đọc lại từ chỗ dừng, lag rút về 0 |
 | `METRIC_CARDINALITY` | Counter `shop.request.tagged` gắn tag `request_ref` khác nhau mỗi request; dừng ở ngưỡng (tối đa 5.000 series), tắt thì xoá hết | Số series của metric tăng vọt rồi dừng (`/actuator/prometheus` cổng 8081 phình từ ~30 KB lên ~450 KB); trang Mô phỏng sự cố hiện số series |
 
 Nhóm API: `ALL`, `CATALOG`, `CART`, `CHECKOUT`, `ACCOUNT`, `ADMIN`.
@@ -60,6 +62,7 @@ Tham số các kịch bản mới:
 |---|---|
 | `PAYMENT_BUSINESS_ERROR` | `code`: `99` core bận / `68` tài khoản không đủ điều kiện / `12` sai định dạng (`99`); `percent` (40). Cổng thanh toán giữ cùng hạn tự tắt, và được tắt khi backend khởi động lại |
 | `ODD_STATUS` | `code`: 423 / 402 / 451 / 429 (423); `percent` (40); `target` (`ALL`) |
+| `KAFKA_SLOW_CONSUMER` | `delayMs`: thời gian thêm cho mỗi đơn, tối đa 20000 (5000 nếu gọi API không truyền; giao diện điền sẵn 15000) |
 | `METRIC_CARDINALITY` | `perRequest`: series mới mỗi request, 1-50 (10); `maxSeries`: ngưỡng, tối đa 5000 (5000) |
 
 Dữ liệu của `EMIT_PII` **luôn là dữ liệu giả cố định**: số thẻ test công khai `4111111111111111`, email `demo@example.com`, CVV `000`; không lấy từ dữ liệu khách nhập.
@@ -107,5 +110,6 @@ Một kịch bản chỉ gây hậu quả khi **có request đi qua**. Bật s�
 2. Mở trang khách hàng, đặt một đơn bằng thẻ, theo dõi request đi qua nginx → backend → dịch vụ thanh toán → hai database.
 3. Bật `SLOW_SQL` 3000 ms trong 30 phút → chỉ ra câu SQL nguyên nhân.
 4. Đặt cổng thanh toán "Quá thời gian chờ" → đơn thẻ thất bại, tỷ lệ thất bại trên trang Tổng quan tăng → chỉ ra dịch vụ ngoài là gốc.
-5. Bật `FRONTEND_ERROR` → khách không thêm được hàng vào giỏ, số đơn giảm dù server không có lỗi nào.
-6. Tắt các kịch bản, đưa cổng thanh toán về "Bình thường".
+5. Bật `KAFKA_CONSUMER_DEAD` 20 phút ở tải mức demo → lag của consumer group tăng đều, group không còn thành viên; tắt đi, lag rút về 0; mở một đơn để thấy trace nối từ lúc đặt sang lúc kho xử lý.
+6. Bật `FRONTEND_ERROR` → khách không thêm được hàng vào giỏ, số đơn giảm dù server không có lỗi nào.
+7. Tắt các kịch bản, đưa cổng thanh toán về "Bình thường".

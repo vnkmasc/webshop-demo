@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Database VM (RHEL 9): PostgreSQL 16 with the shop and payment databases. Idempotent.
+# Database VM (RHEL 9): PostgreSQL 16 with the shop and payment databases, and (KAFKA_ENABLED=true) the order
+# event queue, see kafka.sh. Idempotent.
 # Usage: sudo ./install.sh [/etc/shop/db.env]
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -110,4 +111,8 @@ fw_allow_from "${BACKEND_HOST}" 5432
 fw_apply
 
 systemctl is-active --quiet postgresql || die "postgresql is not running"
+
+if [[ "${KAFKA_ENABLED:-false}" == true ]]; then
+    "${HERE}/kafka.sh" "${ENV_FILE}"
+fi
 log "Database VM ready. Next: install the application VM."

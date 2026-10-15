@@ -14,7 +14,7 @@ Không phụ thuộc công cụ giám sát nào; cột "nơi thấy rõ" chỉ n
 # Biến dùng trong cả tài liệu
 WEB=192.168.50.64    # svfrt: nginx
 APP=192.168.50.65    # svbe: shop-backend, shop-payment (Docker)
-DB=192.168.50.66     # svdb: PostgreSQL
+DB=192.168.50.66     # svdb: PostgreSQL, Kafka
 IFACE=ens33          # card mạng trên các VM
 
 # Kiểm tra nhanh toàn hệ thống (dùng lại sau mỗi bài)
@@ -24,6 +24,7 @@ check() {
   echo "backend   : $(ssh root@$APP 'curl -s http://127.0.0.1:8081/actuator/health/readiness')"
   echo "payment   : $(ssh root@$APP 'curl -s http://127.0.0.1:8090/actuator/health/readiness')"
   echo "postgresql: $(ssh root@$DB 'systemctl is-active postgresql')"
+  echo "kafka     : $(ssh root@$DB 'systemctl is-active kafka'), $(curl -s http://$APP:8081/actuator/prometheus | grep -E '^shop_events_(lag|consumers)' | sed -E 's/\{[^}]*\}//' | paste -sd' ')"
 }
 check
 ```
@@ -82,6 +83,8 @@ status() { curl -s -H "Authorization: Bearer $TOKEN" http://$WEB/api/admin/simul
 | Dịch vụ rủi ro (Python) chậm 2 giây | `sim RISK_SLOW '{"active":true,"durationMinutes":30,"params":{"delayMs":2000}}'` | `sim RISK_SLOW '{"active":false}'` |
 | Dịch vụ rủi ro lỗi 30% | `sim RISK_ERROR '{"active":true,"durationMinutes":30,"params":{"percent":30}}'` | `sim RISK_ERROR '{"active":false}'` |
 | Dịch vụ rủi ro quá thời gian chờ (5 giây > timeout 3 giây) | `sim RISK_TIMEOUT '{"active":true,"durationMinutes":30,"params":{"delayMs":5000}}'` | `sim RISK_TIMEOUT '{"active":false}'` |
+| Hàng đợi xử lý chậm (15 giây mỗi đơn; cần tải mức demo để lag dồn) | `sim KAFKA_SLOW_CONSUMER '{"active":true,"durationMinutes":30,"params":{"delayMs":15000}}'` | `sim KAFKA_SLOW_CONSUMER '{"active":false}'` |
+| Consumer hàng đợi chết (lag tăng đều, group không còn thành viên) | `sim KAFKA_CONSUMER_DEAD '{"active":true,"durationMinutes":30}'` | `sim KAFKA_CONSUMER_DEAD '{"active":false}'` |
 | Nổ cardinality metric (tối đa 5.000 series) | `sim METRIC_CARDINALITY '{"active":true,"durationMinutes":30,"params":{"perRequest":10}}'` | `sim METRIC_CARDINALITY '{"active":false}'` |
 
 Kiểm tra các kịch bản mới:
@@ -97,7 +100,12 @@ ssh root@$APP 'curl -s http://127.0.0.1:8081/actuator/health/readiness | head -c
 ssh root@$APP 'grep payment.card_number /var/log/shop/backend.log | tail -1 | jq -c "{message, \"payment.card_number\"}"'
 # Số series metric
 curl -s http://$APP:8081/actuator/prometheus | grep -c '^shop_request_tagged_total'
+# Hàng đợi: lag và số consumer (backend đo mỗi 10 giây), và cùng số liệu đó từ phía Kafka
+curl -s http://$APP:8081/actuator/prometheus | grep -E '^shop_events_(lag|consumers)'
+ssh root@$DB 'runuser -u kafka -- /opt/kafka/current/bin/kafka-consumer-groups.sh --bootstrap-server 127.0.0.1:9092 --describe --group shop-warehouse'
 ```
+
+`KAFKA_CONSUMER_DEAD` có hiệu lực sau tối đa ~5 giây, và consumer đọc lại sau tối đa ~5 giây khi tắt kịch bản. Ở tải nền (~10 đơn/giờ), lag chỉ tăng vài đơn; muốn thấy rõ đường lag đi lên, dùng tải mức demo (~7 đơn/phút).
 
 Xem kịch bản đang bật: `status`. Ý nghĩa từng kịch bản: [../../scenarios/README.md](../../scenarios/README.md).
 
@@ -178,6 +186,22 @@ ssh root@$DB "modprobe sch_netem && nohup sh -c 'tc qdisc add dev $IFACE root ne
 - Biến thể mất gói 5%: thay `delay 100ms 20ms` bằng `loss 5%` (kết nối chập chờn, thỉnh thoảng timeout).
 - **Khôi phục sớm:** `ssh root@$DB "tc qdisc del dev $IFACE root"`
 - **Kiểm tra:** `ssh root@$DB "tc qdisc show dev $IFACE"` phải không còn `netem`.
+
+### 2.8 Dừng Kafka
+
+```bash
+ssh root@$DB 'systemctl stop kafka'
+```
+- **Hiện tượng:** khách vẫn đặt hàng bình thường; sau ~10 giây backend ghi ERROR `Order event ORDER_PLACED ... could not be sent to the queue`, đơn mới có trạng thái kho **Không gửi được sang kho**. Metric `shop_events_lag`, `shop_events_consumers` thành `NaN`; trang Mô phỏng sự cố hiện "Hàng đợi: không đo được". Consumer ghi WARN mất kết nối tới broker.
+- **Khôi phục:** `ssh root@$DB 'systemctl start kafka'` (~15 giây). Producer và consumer tự kết nối lại. Các đơn đặt lúc Kafka dừng **không được gửi lại**, giữ nguyên "Không gửi được sang kho".
+
+### 2.9 Kafka chết đột ngột (kill -9), systemd tự dựng lại
+
+```bash
+ssh root@$DB 'systemctl kill -s KILL kafka'
+```
+- **Hiện tượng:** tiến trình Kafka mất rồi xuất hiện lại sau ~10 giây (`RestartSec=10`); số lần khởi động lại: `systemctl show kafka -p NRestarts`. Metric hàng đợi về số thật sau ~30-45 giây.
+- **Khôi phục:** tự động.
 
 ## 3. Máy ứng dụng (svbe)
 
@@ -306,11 +330,11 @@ Khi không chắc còn gì đang bật (không dùng `firewall-cmd --reload`, xe
 # Ứng dụng: tắt mọi kịch bản và đưa cổng thanh toán về bình thường (cần TOKEN ở mục 1)
 for s in LATENCY HTTP_ERROR SLOW_SQL N_PLUS_ONE POOL_EXHAUSTION HIGH_CPU MEMORY_LEAK FRONTEND_ERROR \
          PAYMENT_BUSINESS_ERROR ODD_STATUS READINESS_FAIL EMIT_PII METRIC_CARDINALITY \
-         RISK_SLOW RISK_ERROR RISK_TIMEOUT; do sim $s '{"active":false}'; done
+         RISK_SLOW RISK_ERROR RISK_TIMEOUT KAFKA_SLOW_CONSUMER KAFKA_CONSUMER_DEAD; do sim $s '{"active":false}'; done
 gateway '{"baseLatencyMs":250,"extraLatencyMs":0,"errorRatePercent":0,"declineRatePercent":3,"outage":false}'
 
 # Hạ tầng
-ssh root@$DB  "firewall-cmd --remove-rich-rule='rule family=\"ipv4\" source address=\"$APP\" port port=\"5432\" protocol=\"tcp\" drop' 2>/dev/null; tc qdisc del dev $IFACE root 2>/dev/null; rm -f /var/tmp/disk-fill.img; systemctl start postgresql; \
+ssh root@$DB  "firewall-cmd --remove-rich-rule='rule family=\"ipv4\" source address=\"$APP\" port port=\"5432\" protocol=\"tcp\" drop' 2>/dev/null; tc qdisc del dev $IFACE root 2>/dev/null; rm -f /var/tmp/disk-fill.img; systemctl start postgresql kafka; \
                runuser -u postgres -- psql -qc \"SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE query LIKE '%generate_series(1, 1e12)%' AND pid <> pg_backend_pid()\""
 ssh root@$APP "firewall-cmd --remove-rich-rule='rule family=\"ipv4\" source address=\"$WEB\" port port=\"8080\" protocol=\"tcp\" drop' 2>/dev/null; tc qdisc del dev $IFACE root 2>/dev/null; pkill -x yes; pkill -f 'bytearray(3'; systemctl start shop-payment shop-risk shop-backend"
 ssh root@$WEB 'systemctl start nginx'

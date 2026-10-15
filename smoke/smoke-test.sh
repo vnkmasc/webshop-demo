@@ -92,6 +92,18 @@ expect "admin products (low stock)" 200 "$(req GET '/admin/products?lowStock=tru
 expect "admin orders PENDING" 200 "$(req GET '/admin/orders?status=PENDING&q=098765' '' "${AT}")"
 expect "admin customers" 200 "$(req GET '/admin/customers?q=nguyen' '' "${AT}")"
 expect "admin coupons" 200 "$(req GET /admin/coupons '' "${AT}")"
+# Order queue: the warehouse consumer takes the order over within seconds (skipped when no queue is configured).
+for _ in $(seq 1 15); do
+    req GET "/admin/orders/${COD_CODE}" '' "${AT}" >/dev/null
+    FULFILLMENT="$(jqr '.data.order.fulfillmentStatus')"
+    [[ "${FULFILLMENT}" == QUEUED ]] || break
+    sleep 1
+done
+case "${FULFILLMENT}" in
+    RECEIVED) ok "order queue: warehouse received ${COD_CODE}" ;;
+    null | "") ok "order queue not configured (skipped)" ;;
+    *) bad "order queue: ${COD_CODE} is ${FULFILLMENT}" ;;
+esac
 expect "confirm COD order" 200 "$(req POST "/admin/orders/${COD_CODE}/status" '{"status":"CONFIRMED"}' "${AT}")"
 expect "ship COD order" 200 "$(req POST "/admin/orders/${COD_CODE}/status" '{"status":"SHIPPING"}' "${AT}")"
 expect "deliver COD order" 200 "$(req POST "/admin/orders/${COD_CODE}/status" '{"status":"DELIVERED"}' "${AT}")"

@@ -6,7 +6,7 @@ Hướng dẫn cho người mới: **xem gì, đọc gì, làm gì, test gì**, 
 |---|---|---|
 | svfrt | 192.168.50.64 | nginx (trang web) |
 | svbe | 192.168.50.65 | backend Java, cổng thanh toán (container), chấm điểm rủi ro Python (container) |
-| svdb | 192.168.50.66 | PostgreSQL |
+| svdb | 192.168.50.66 | PostgreSQL, hàng đợi Kafka (topic `orders`) |
 | control-plane | 192.168.50.46 | tải giả lập k6 (user `cp`) |
 
 ## 1. Xem gì trước (10 phút): làm quen sản phẩm
@@ -14,12 +14,14 @@ Hướng dẫn cho người mới: **xem gì, đọc gì, làm gì, test gì**, 
 1. **Trang bán hàng** http://192.168.50.64: xem một đôi giày, thêm vào giỏ, đặt một đơn **COD** và một đơn **thẻ** `4111 1111 1111 1111` (hạn `12/30`, CVV `123`).
 2. **Trang quản trị** http://192.168.50.64/admin: `admin@saibuoc.vn`, mật khẩu là `APP_ADMIN_PASSWORD` trong `/etc/shop/app.env` trên svbe.
    - **Tổng quan**: doanh thu, tỷ lệ thanh toán thẻ thất bại.
-   - **Đơn hàng**: hai đơn vừa đặt, cột **Rủi ro** (điểm do dịch vụ Python chấm).
+   - **Đơn hàng**: hai đơn vừa đặt, cột **Rủi ro** (điểm do dịch vụ Python chấm) và cột **Kho** ("Kho đã nhận" sau khoảng 1 giây, qua hàng đợi Kafka).
    - **Mô phỏng sự cố**: các thẻ bật/tắt sự cố, chỗ dùng nhiều nhất khi demo.
 3. **Trên công cụ giám sát**, tìm:
    - 3 host svfrt, svbe, svdb;
-   - các service: nginx, `shop-backend` (Java), `payment-gateway` (Java, container), `risk` (Python, container), PostgreSQL;
+   - các service: nginx, `shop-backend` (Java), `payment-gateway` (Java, container), `risk` (Python, container), PostgreSQL, Kafka (tiến trình Java trên svdb);
    - **một trace của đơn thẻ vừa đặt**: nginx → backend → risk (Python) → payment → database.
+
+   - trace đó còn có một nhánh **bất đồng bộ**: backend gửi bản ghi vào Kafka, rồi consumer `shop-warehouse` (kho) xử lý.
 
    Thấy được trace đó là phần nền đã ổn. Python cần cấu hình riêng tùy công cụ, xem [targets/rhel-3vm/README.md](targets/rhel-3vm/README.md#dịch-vụ-chấm-điểm-rủi-ro-python).
 
@@ -61,6 +63,7 @@ Kịch bản dễ thấy nhất; làm được bài này là dùng được mọ
 | 3 | Lỗi 500 (nhóm Đặt hàng) | Stack trace và log của đúng request lỗi; log có sẵn trace id |
 | 4 | **Lỗi nghiệp vụ trong body** | Công cụ báo **thành công** dù giao dịch thất bại, cho tới khi cấu hình bắt header `X-Response-Code`. Điểm bán hàng mạnh nhất với khách ngân hàng |
 | 5 | Dịch vụ rủi ro chậm / quá thời gian chờ | Trace xuyên Java → Python; thời gian chờ nằm ở dịch vụ Python; tắt dịch vụ Python khách vẫn mua được |
+| 5b | **Consumer hàng đợi chết** / Hàng đợi xử lý chậm | Lag consumer group tăng rồi rút; group về 0 thành viên; trace nối từ lúc đặt hàng sang lúc kho xử lý. Cần tải mức demo |
 | 6 | Lộ dữ liệu nhạy cảm (giả) | Thấy số thẻ test trong trace/log → cấu hình che → biến mất |
 | 7 | Mã HTTP lạ (423/451...) | Lọc, cảnh báo theo mã trạng thái HTTP |
 | 8 | Readiness hỏng | Endpoint readiness báo DOWN trong khi tiến trình vẫn sống (liveness UP); cần công cụ giám sát theo dõi endpoint này (ví dụ synthetic/HTTP monitor tới cổng 8081) |

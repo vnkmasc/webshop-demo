@@ -10,7 +10,7 @@ Tài liệu này liệt kê **mọi thành phần chạy nền** của hệ th�
 |---|---|---|---|
 | Web | `svfrt` | 192.168.50.64 | nginx + giao diện |
 | Ứng dụng | `svbe` | 192.168.50.65 | Backend + cổng thanh toán |
-| CSDL | `svdb` | 192.168.50.66 | PostgreSQL |
+| CSDL | `svdb` | 192.168.50.66 | PostgreSQL + hàng đợi Kafka |
 | Máy điều khiển | `control-plane` | 192.168.50.46 | Tải giả lập (k6), build, deploy |
 
 ## 1. Danh sách thành phần
@@ -23,6 +23,7 @@ Tài liệu này liệt kê **mọi thành phần chạy nền** của hệ th�
 | svbe | Cổng thanh toán | **container Docker**, systemd chạy `docker run` | `shop-payment` (container cùng tên) | 127.0.0.1:8090 | Có |
 | svbe | Chấm điểm rủi ro đơn hàng (Python 3.11, FastAPI) | **container Docker**, systemd chạy `docker run` | `shop-risk` (container cùng tên) | 127.0.0.1:8095 | Có |
 | svdb | PostgreSQL 16 (`shop`, `payments`) | systemd service | `postgresql` | 5432 | Có |
+| svdb | Hàng đợi đơn hàng: Apache Kafka 4.3 (KRaft, 1 node), topic `orders` | systemd service (Java) | `kafka` | 9092 (chỉ svbe), 9093 (127.0.0.1) | Có |
 | svdb | Backup database 02:30 hằng ngày | cron | `/etc/cron.d/shop-db-backup` | - | Có |
 | svdb | Dọn đơn do tải tạo ra, quá 2 ngày, 03:00 hằng ngày | cron | `/etc/cron.d/shop-load-cleanup` | - | Có |
 | control-plane | Tải giả lập k6 (2 người dùng ảo, ~55 request/phút, ~10 đơn/giờ) | systemd **user** service của `cp` | `shop-load` | - | Có (linger bật) |
@@ -34,7 +35,7 @@ Không có thành phần nào khác của hệ thống chạy nền.
 ```bash
 # Từ control-plane
 for h in 192.168.50.64 192.168.50.65 192.168.50.66; do
-  ssh root@$h 'echo "== $(hostname)"; systemctl is-active nginx shop-backend shop-payment postgresql 2>/dev/null | paste -sd" "'
+  ssh root@$h 'echo "== $(hostname)"; systemctl is-active nginx shop-backend shop-payment shop-risk postgresql kafka 2>/dev/null | paste -sd" "'
 done
 systemctl --user is-active shop-load
 curl -s -o /dev/null -w '%{http_code}\n' http://192.168.50.64/api/site-config    # 200 là chạy
@@ -132,6 +133,28 @@ ENV_FILE=/etc/shop/db.env /usr/local/bin/shop-load-cleanup 0    # xóa ngay mọ
 mv /etc/cron.d/shop-load-cleanup /root/                          # tắt lịch dọn
 ```
 
+### Kafka (svdb)
+
+Hàng đợi sự kiện đơn hàng. Backend gửi `ORDER_PLACED` vào topic `orders` (3 partition) sau mỗi đơn đặt thành công; consumer group `shop-warehouse` (chạy trong backend, đóng vai **kho**) đọc và đánh dấu đơn "Kho đã nhận". Cột **Kho** ở **Quản trị → Đơn hàng** cho thấy trạng thái; lag và số consumer hiện ở đầu trang **Mô phỏng sự cố**.
+
+```bash
+systemctl status kafka
+systemctl stop kafka             # khách vẫn đặt được hàng; đơn mới bị đánh dấu "Không gửi được sang kho"
+systemctl start kafka
+K=/opt/kafka/current/bin
+runuser -u kafka -- $K/kafka-consumer-groups.sh --bootstrap-server 127.0.0.1:9092 --describe --group shop-warehouse   # lag từng partition
+runuser -u kafka -- $K/kafka-topics.sh --bootstrap-server 127.0.0.1:9092 --describe --topic orders
+```
+
+| File | Nội dung |
+|---|---|
+| `/etc/kafka/server.properties` | Cấu hình broker (sinh bởi `deploy/vm-db/kafka.sh`) |
+| `/etc/systemd/system/kafka.service` | Heap 512 MB (`KAFKA_HEAP` trong `db.env`) |
+| `/var/lib/kafka/data` | Dữ liệu; giữ 72 giờ (`KAFKA_RETENTION_HOURS`) |
+| `/var/log/kafka/server.log` | Log broker |
+
+Firewall: cổng 9092 chỉ mở cho svbe. Không có xác thực (PLAINTEXT), chỉ dùng trong mạng nội bộ. Phía backend: `APP_KAFKA_BOOTSTRAP=192.168.50.66:9092` trong `app.env`; để trống là tắt hàng đợi (đơn không có trạng thái kho, kịch bản `KAFKA_*` không bật được). Đơn của tải bị lịch dọn xóa trước khi kho nhận (khi consumer chết lâu) thì kho bỏ qua sự kiện đó.
+
 ### Tải giả lập k6 (control-plane, user `cp`)
 
 Chạy dưới dạng systemd user service để có lưu lượng liên tục vào shop (các nhóm hành vi: [../../scenarios/README.md](../../scenarios/README.md)). File unit mẫu: [`load/shop-load.user.service`](../../load/shop-load.user.service).
@@ -169,13 +192,13 @@ Tải giả lập tạo đơn hàng thật trong database (ghi chú `k6`); nhóm
 systemctl --user disable --now shop-load                                 # control-plane
 ssh root@192.168.50.64 'systemctl disable --now nginx'
 ssh root@192.168.50.65 'systemctl disable --now shop-backend shop-payment shop-risk'
-ssh root@192.168.50.66 'systemctl disable --now postgresql; mv /etc/cron.d/shop-db-backup /etc/cron.d/shop-load-cleanup /root/ 2>/dev/null'
+ssh root@192.168.50.66 'systemctl disable --now kafka postgresql; mv /etc/cron.d/shop-db-backup /etc/cron.d/shop-load-cleanup /root/ 2>/dev/null'
 ```
 
 Bật lại theo thứ tự CSDL → ứng dụng → web → tải:
 
 ```bash
-ssh root@192.168.50.66 'systemctl enable --now postgresql; mv /root/shop-db-backup /root/shop-load-cleanup /etc/cron.d/ 2>/dev/null'
+ssh root@192.168.50.66 'systemctl enable --now postgresql kafka; mv /root/shop-db-backup /root/shop-load-cleanup /etc/cron.d/ 2>/dev/null'
 ssh root@192.168.50.65 'systemctl enable --now shop-payment shop-risk shop-backend'
 ssh root@192.168.50.64 'systemctl enable --now nginx'
 systemctl --user enable --now shop-load
