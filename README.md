@@ -43,3 +43,4 @@ Yêu cầu chung của ứng dụng khi demo: `APP_SEED_ENABLED=true` (dữ li�
 | Target | Mô tả | Trạng thái |
 |---|---|---|
 | [`rhel-3vm`](targets/rhel-3vm/README.md) | 3 máy RHEL 9.x; backend Java chạy bằng systemd, cổng thanh toán (Java) và chấm điểm rủi ro (Python) chạy bằng Docker CE, PostgreSQL 16 từ AppStream, nginx | Đang dùng (svfrt / svbe / svdb) |
+| Kubernetes (cụm dev) | Chạy theo [k8s/README.md](https://github.com/vnkmasc/webshop/blob/main/k8s/README.md) của repo `webshop`: namespace `webshop` trên cụm có master 192.168.50.46, image trên Harbor `harbor.mcredit.local:30003/library`, cửa hàng ở `http://192.168.50.47:30080` | Đang chạy, độc lập với 3 máy RHEL (database và Kafka riêng) |
