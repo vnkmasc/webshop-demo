@@ -108,6 +108,8 @@ Một kịch bản chỉ gây hậu quả khi **có request đi qua**. Bật s�
 - **Cảnh báo theo ngưỡng cố định hoạt động ngay**, không cần học: CPU host bão hòa, hết bộ nhớ, tiến trình hoặc dịch vụ ngừng hoạt động. Để có cảnh báo ngay trong ngày đầu, ưu tiên các kịch bản: `HIGH_CPU` với `cpuMs` 4000-5000 (đẩy CPU máy ứng dụng lên gần 100%), dừng hẳn `shop-payment` hoặc `shop-backend`, hoặc đặt ngưỡng thời gian phản hồi / tỷ lệ lỗi cố định cho dịch vụ trong cấu hình phát hiện bất thường.
 - Dịch vụ có ít request (dưới khoảng 10 request/phút) có thể bị bỏ qua để tránh báo nhiễu. Ở mức tải nền, backend nhận ~55 request/phút nhưng cổng thanh toán gần như không có request; trước khi demo sự cố thanh toán, chuyển sang mức demo (`VUS=10 BUY_PERCENT=25 ORDERS_PER_MIN=10`, cổng thanh toán ~8 request/phút) hoặc tăng riêng `ORDERS_PER_MIN`.
 
+- **Thành phần phụ trợ hỏng "êm" thì không có lỗi HTTP.** Dừng Kafka hay dịch vụ chấm điểm rủi ro: khách vẫn mua được, mọi request vẫn 200, nên công cụ giám sát không tự mở problem. Đây là thiết kế đúng (không để phần phụ làm hỏng phần chính) và là tình huống tốt để demo: muốn biết thì phải giám sát chính thành phần đó (tiến trình, health check, metric) hoặc tín hiệu nghiệp vụ (header `X-Order-Queue: FAILED`, số đơn chưa gửi sang kho). Cách cấu hình cho Kafka: [targets/rhel-3vm/README.md](../targets/rhel-3vm/README.md#để-dừng-kafka-thành-cảnh-báo).
+
 ## 5. Gợi ý một buổi demo
 
 1. Chạy tải nền liên tục từ ít nhất 1-2 ngày trước (để có baseline), tối thiểu vài giờ.

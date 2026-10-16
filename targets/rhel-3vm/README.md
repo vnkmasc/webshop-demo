@@ -81,7 +81,20 @@ Ra được dòng `traceparent:00-...` là trace sẽ nối được (một số
 |---|---|
 | Dynatrace | Trace producer/consumer: tự có (đã thấy `traceparent`, `X-dynaTrace` trên bản ghi). Metric broker, topic, consumer group: kích hoạt extension **Apache Kafka** từ Hub cho host CSDL |
 | Instana | Agent trên host CSDL tự nhận broker Kafka (sensor Kafka); trace producer/consumer tự có từ agent Java trên máy ứng dụng |
-| Công cụ khác / chung | Lag và số consumer có sẵn ở `/actuator/prometheus` cổng 8081: `shop_events_lag`, `shop_events_consumers` (đo từ broker, vẫn đúng khi consumer chết) |
+| Công cụ khác / chung | Lag và số consumer có sẵn ở `/actuator/prometheus` cổng 8081: `shop_events_lag`, `shop_events_consumers` (đo từ broker, vẫn đúng khi consumer chết), `shop_events_unsent` (số đơn chưa gửi được) |
+
+#### Để dừng Kafka thành cảnh báo
+
+Kafka là phần phụ trợ: dừng nó thì cửa hàng vẫn bán, mọi request vẫn trả 200. Không cấu hình gì thì công cụ giám sát thường **im lặng**. Ứng dụng để lại các dấu hiệu sau (chi tiết: [fault-drills.md mục 2.8](fault-drills.md#28-dừng-kafka)); chọn một vài cách bắt dưới đây, cách 1 cho cảnh báo nhanh nhất.
+
+| # | Dấu hiệu | Dynatrace | Công cụ khác |
+|---|---|---|---|
+| 1 | Tiến trình Kafka biến mất trên svdb | **Settings → Processes and containers → Process availability**: thêm rule (ví dụ tên "Kafka", điều kiện command line chứa `kafka.Kafka`, phạm vi host svdb). Dừng Kafka → problem "Process unavailable" trong khoảng 1 phút. Làm tương tự cho `postgres`, `nginx`, `shop-backend.jar` | Cảnh báo tiến trình/dịch vụ systemd dừng |
+| 2 | Request đặt hàng có header `X-Order-Queue: FAILED` | Tạo **request attribute** từ response header `X-Order-Queue` (service `shop-backend`), rồi **Failure detection → custom error rule**: request attribute = `FAILED` thì tính là lỗi. `/api/orders` khi đó có tỷ lệ lỗi tăng vọt → problem theo tỷ lệ lỗi | Lọc/cảnh báo theo header hoặc span attribute |
+| 3 | `/api/orders` chậm thêm ~3 giây | Tự thấy trên service `shop-backend`; problem response time cần baseline đã học (xem [scenarios/README.md mục 4](../../scenarios/README.md#4-điều-kiện-để-công-cụ-giám-sát-mở-cảnh-báo)) hoặc ngưỡng cố định cho request `/api/orders` | Cảnh báo độ trễ theo endpoint |
+| 4 | Log ERROR `could not be sent to the queue`, WARN `Order queue still unavailable` | Thu log `/var/log/shop/backend.log` (Log ingest rule), rồi **Log events**: nội dung chứa `could not be sent to the queue` → sự kiện loại Error, mở problem | Cảnh báo theo log |
+| 5 | `/actuator/health` cổng 8081 trả 503 (`orderQueue` DOWN) | **HTTP monitor** (synthetic) tới `http://192.168.50.65:8081/actuator/health` từ một ActiveGate trong mạng 192.168.50.0/24 | Bất kỳ HTTP check nào |
+| 6 | Metric broker biến mất, `shop_events_unsent` tăng | Extension **Apache Kafka** cho host svdb (broker offline); `shop_events_unsent` cần đưa metric Prometheus vào công cụ | Scrape `/actuator/prometheus`, cảnh báo `shop_events_unsent > 0` |
 
 ### Dịch vụ chấm điểm rủi ro (Python)
 

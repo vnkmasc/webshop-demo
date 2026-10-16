@@ -192,8 +192,16 @@ ssh root@$DB "modprobe sch_netem && nohup sh -c 'tc qdisc add dev $IFACE root ne
 ```bash
 ssh root@$DB 'systemctl stop kafka'
 ```
-- **Hiện tượng:** khách vẫn đặt hàng bình thường; sau ~10 giây backend ghi ERROR `Order event ORDER_PLACED ... could not be sent to the queue`, đơn mới có trạng thái kho **Không gửi được sang kho**. Metric `shop_events_lag`, `shop_events_consumers` thành `NaN`; trang Mô phỏng sự cố hiện "Hàng đợi: không đo được". Consumer ghi WARN mất kết nối tới broker.
-- **Khôi phục:** `ssh root@$DB 'systemctl start kafka'` (~15 giây). Producer và consumer tự kết nối lại. Các đơn đặt lúc Kafka dừng **không được gửi lại**, giữ nguyên "Không gửi được sang kho".
+- **Hiện tượng (phía khách):** vẫn đặt hàng được, nhưng mỗi lần đặt **chậm thêm ~3 giây** (backend chờ broker xác nhận rồi bỏ cuộc).
+- **Hiện tượng (phía ứng dụng):**
+  - Request `POST /api/orders` có header `X-Order-Queue: FAILED` (bình thường `SENT`), trong trace có exception `OrderEventPublisher$OrderEventException`, log ERROR `Order event ORDER_PLACED ... could not be sent to the queue` kèm trace id.
+  - Đơn mới có trạng thái kho **Không gửi được sang kho**; trang Mô phỏng sự cố hiện "Chưa gửi được sang kho: N đơn" và "Hàng đợi: không kết nối được broker".
+  - Cứ 30 giây backend thử gửi lại và ghi WARN `Order queue still unavailable, orders waiting for the warehouse: N`.
+  - `/actuator/health` (cổng 8081) trả **503**, thành phần `orderQueue` DOWN; liveness và readiness vẫn UP (cửa hàng vẫn bán).
+  - Metric `shop_events_unsent` tăng theo số đơn; `shop_events_lag`, `shop_events_consumers` thành `NaN`.
+- **Hiện tượng (phía hạ tầng):** tiến trình Kafka (Java, `kafka.Kafka`) biến mất trên svdb.
+- **Công cụ giám sát có báo không:** chỉ khi đã cấu hình, xem [README.md](README.md#để-dừng-kafka-thành-cảnh-báo). Không cấu hình gì thì thường **không có problem nào**: request vẫn thành công (HTTP 200), và một tiến trình dừng có chủ đích không tự thành sự cố. Đây chính là điểm nên nói với khách: phần phụ trợ hỏng "êm" thì phải giám sát chính nó hoặc kết quả nghiệp vụ, không chờ lỗi HTTP.
+- **Khôi phục:** `ssh root@$DB 'systemctl start kafka'` (~15 giây). Trong vòng 30 giây backend tự gửi lại các đơn "Không gửi được sang kho" (log `Re-sent N order events to the queue`, lịch sử đơn có dòng "Đã gửi lại đơn sang kho qua hàng đợi"); khoảng 20-45 giây sau consumer nhận lại và các đơn thành "Kho đã nhận". Không mất đơn nào.
 
 ### 2.9 Kafka chết đột ngột (kill -9), systemd tự dựng lại
 
