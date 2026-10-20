@@ -6,6 +6,61 @@ Thứ tự: **CSDL → ứng dụng → web**. Mọi script có thể chạy l�
 
 Ví dụ địa chỉ trong tài liệu: web `10.0.0.11`, ứng dụng `10.0.0.12`, CSDL `10.0.0.13`.
 
+## Kiến trúc
+
+Nét liền là gọi đồng bộ (chậm/lỗi là khách thấy ngay), nét đứt là bất đồng bộ qua Kafka (Kafka dừng thì vẫn đặt được đơn, đơn chờ gửi lại).
+
+```mermaid
+flowchart LR
+    user(["Khách hàng / Admin<br/>trình duyệt"])
+
+    subgraph web["Máy web (svfrt) · 10.0.0.11"]
+        nginx["nginx :80<br/>SPA React + proxy /api"]
+    end
+
+    subgraph app["Máy ứng dụng (svbe) · 10.0.0.12"]
+        subgraph backend["shop-backend · Spring Boot :8080 (systemd)"]
+            auth["AuthController<br/>/api/auth/login · register · me<br/>/api/account/profile"]
+            catalog["CatalogController<br/>/api/home · /api/products<br/>/api/catalog/categories · facets"]
+            order["OrderController<br/>/api/cart/quote · /api/orders<br/>/api/orders/lookup · /api/account/orders"]
+            admin["AdminController<br/>/api/admin/dashboard · orders · products<br/>coupons · customers · payment-gateway"]
+            sim["SimulationController<br/>/api/site-config<br/>/api/admin/simulation"]
+            consumer["WarehouseConsumer<br/>nhận sự kiện đơn hàng"]
+            relay["OrderEventRelay<br/>gửi lại đơn SEND_FAILED mỗi 30s"]
+        end
+        payment["payment-gateway · Spring Boot :8090 (Docker)<br/>thanh toán thẻ · hoàn tiền"]
+        risk["risk · FastAPI/uvicorn :8095 (Docker)<br/>chấm điểm rủi ro"]
+    end
+
+    subgraph db["Máy CSDL (svdb) · 10.0.0.13"]
+        pg_shop[("PostgreSQL :5432<br/>DB shop")]
+        pg_pay[("PostgreSQL :5432<br/>DB payments")]
+        kafka[["Kafka :9092<br/>topic đơn hàng"]]
+    end
+
+    user -->|HTTP :80| nginx
+    nginx -->|/api/*| auth & catalog & order & admin & sim
+
+    auth --> pg_shop
+    catalog --> pg_shop
+    order --> pg_shop
+    admin --> pg_shop
+    sim --> pg_shop
+
+    order -->|chấm điểm rủi ro| risk
+    order -->|"thanh toán thẻ · hoàn tiền khi khách hủy"| payment
+    admin -->|"hoàn tiền khi admin hủy · cấu hình cổng"| payment
+    sim -->|bật lỗi nghiệp vụ| payment
+    payment --> pg_pay
+
+    order -.->|sự kiện đơn mới| kafka
+    relay -.->|gửi lại khi Kafka sống lại| kafka
+    kafka -.->|consume| consumer
+    consumer -->|"đánh dấu kho đã nhận"| pg_shop
+```
+
+`shop` và `payments` là hai database trên cùng một PostgreSQL; công cụ giám sát thường hiện thành hai dịch vụ CSDL riêng.
+
 ## 1. Đóng gói
 
 Trên máy build có JDK 21 và Node 22, với repo `webshop` (mã nguồn ứng dụng) clone cạnh repo này hoặc chỉ định bằng tham số thứ hai / `WEBSHOP_DIR`:

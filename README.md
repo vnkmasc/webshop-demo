@@ -11,7 +11,7 @@ webshop-demo/
 ├── START-HERE.md         Xem gì, đọc gì, làm gì, test gì - cho người mới
 ├── targets/
 │   └── rhel-3vm/         Ba máy RHEL 9: web (nginx) / ứng dụng (backend + payment container) / CSDL (PostgreSQL)
-│       ├── README.md       Hướng dẫn triển khai
+│       ├── README.md       Hướng dẫn triển khai, sơ đồ kiến trúc
 │       ├── operations.md   Những gì đang chạy, bật/tắt từng phần, tắt toàn bộ
 │       ├── fault-drills.md Bài tập sự cố: lệnh gây sự cố, hiện tượng, khôi phục (DB, mạng, CPU, đĩa, tiến trình...)
 │       ├── build-release.sh  Build từ repo webshop + đóng gói kèm script triển khai
